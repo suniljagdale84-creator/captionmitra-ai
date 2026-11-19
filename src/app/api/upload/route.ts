@@ -62,7 +62,25 @@ async function verifyTurnstile(token: string, request: Request) {
 
   return result.success === true;
 }
+export async function GET() {
+  const siteKey = process.env.SITE_KEY;
 
+  if (!siteKey) {
+    return NextResponse.json(
+      { error: "Cloudflare Site Key is missing." },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json(
+    { siteKey },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    }
+  );
+}
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as HandleUploadPresignedBody;
