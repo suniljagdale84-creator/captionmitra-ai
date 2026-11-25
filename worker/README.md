@@ -33,7 +33,8 @@ npm run check
 
 ## Not implemented
 - No queue polling loop or automatic job execution.
-- No Vercel Blob downloader yet.
+- Private Vercel Blob downloader using the SDK `get(pathname, { access: 'private', token })`, with pathname validation, streaming byte limits, and restrictive local file permissions.
+- Queue polling loop primitive with one/two worker slots and retry handling is drafted, but intentionally not enabled by the HTTP server until a real processor is implemented.
 - No audio chunking, OpenAI calls, translation, or SRT/TXT generation.
 - No payment verification or payment-triggered enqueue endpoint.
 - No lease-expiry recovery scheduler or Blob/local-file cleanup scheduler.
