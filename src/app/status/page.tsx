@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, ShieldCheck, Clock3, CheckCircle2, AlertCircle } from "lucide-react";
 
 type JobStatus = {
@@ -23,9 +23,12 @@ export default function JobStatusPage() {
   const [job,setJob]=useState<JobStatus|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [lastChecked,setLastChecked]=useState<string>("");
 
-  async function lookup(e: React.FormEvent) {
-    e.preventDefault(); setBusy(true); setError(""); setJob(null);
+  async function refreshStatus(silent = false) {
+    if (!jobId.trim() || !token) return;
+    if (!silent) setBusy(true);
+    if (!silent) setError("");
     try {
       const response=await fetch(`/api/jobs/${encodeURIComponent(jobId.trim())}/status`,{
         method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",
@@ -34,9 +37,21 @@ export default function JobStatusPage() {
       const data=await response.json();
       if(!response.ok) throw new Error(data.error || "Could not find this job.");
       setJob(data);
-    } catch(err) { setError(err instanceof Error?err.message:"Could not retrieve status."); }
-    finally { setBusy(false); }
+      setLastChecked(new Date().toLocaleTimeString());
+    } catch(err) { if (!silent) setError(err instanceof Error?err.message:"Could not retrieve status."); }
+    finally { if (!silent) setBusy(false); }
   }
+
+  async function lookup(e: React.FormEvent) {
+    e.preventDefault(); setJob(null);
+    await refreshStatus(false);
+  }
+
+  useEffect(() => {
+    if (!job || ["completed","payment_failed","processing_failed","refunded","expired","cancelled"].includes(job.status)) return;
+    const timer = window.setInterval(() => { void refreshStatus(true); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [job?.status, jobId, token]);
 
   return <main style={{maxWidth:680,margin:"48px auto",padding:24,fontFamily:"Arial,sans-serif"}}>
     <a href="/" style={{color:"#2563eb",textDecoration:"none"}}>← CaptionMitra</a>
@@ -57,8 +72,10 @@ export default function JobStatusPage() {
       <p><strong>Amount:</strong> {job.amountPaise===null?"Pending":new Intl.NumberFormat("en-IN",{style:"currency",currency:job.currency}).format(job.amountPaise/100)}</p>
       <p><strong>Last updated:</strong> {new Date(job.updatedAt).toLocaleString()}</p>
       <p><strong>Expiry:</strong> {new Date(job.expiresAt).toLocaleString()}</p>
-      {job.downloadReady&&<p style={{color:"#0f766e"}}><CheckCircle2 size={17}/> Your result is ready. Secure download will be available through the download page.</p>}
-      {!job.downloadReady&&<p style={{color:"#64748b"}}><Clock3 size={17}/> Refresh this page later to see updates.</p>}
+      {job.downloadReady&&<p style={{color:"#0f766e"}}><CheckCircle2 size={17}/> Your result is ready. Secure download integration is the next storage-dependent step.</p>}
+      {!job.downloadReady&&<p style={{color:"#64748b"}}><Clock3 size={17}/> This page checks automatically every 8 seconds while your job is active.</p>}
+      {lastChecked&&<p style={{fontSize:12,color:"#64748b"}}>Last checked: {lastChecked}</p>}
+      <button type="button" onClick={()=>void refreshStatus(false)} disabled={busy} style={{...button,background:"#475569",marginTop:8}}>Refresh now</button>
     </section>}
     <p style={{fontSize:12,color:"#64748b",marginTop:24}}>Keep your access key private. It is sent securely for verification and is not stored in this page.</p>
   </main>;
