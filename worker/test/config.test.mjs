@@ -13,6 +13,7 @@ test("loads bounded worker configuration", () => {
   const config = loadWorkerConfig(validEnv);
   assert.equal(config.concurrency, 1);
   assert.equal(config.maxInputBytes, 209715200);
+  assert.equal(config.port, 8080);
 });
 
 test("rejects missing secrets", () => {
@@ -21,6 +22,10 @@ test("rejects missing secrets", () => {
 
 test("rejects weak worker shared secret", () => {
   assert.throws(() => loadWorkerConfig({ ...validEnv, WORKER_SHARED_SECRET: "short" }), /at least 32 bytes/);
+});
+
+test("rejects invalid worker port", () => {
+  assert.throws(() => loadWorkerConfig({ ...validEnv, WORKER_PORT: "70000" }), /valid TCP port/);
 });
 
 test("rejects unsafe concurrency", () => {
