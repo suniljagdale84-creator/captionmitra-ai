@@ -31,7 +31,10 @@ declare global {
       handler: (response: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => void;
       modal?: { ondismiss?: () => void };
       theme?: { color?: string };
-    }) => { open: () => void };
+    }) => {
+      open: () => void;
+      on: (event: "payment.failed", callback: (response: { error?: { description?: string; reason?: string } }) => void) => void;
+    };
     turnstile?: {
       render: (container: HTMLElement, options: {
         sitekey: string;
@@ -132,6 +135,9 @@ export default function Home() {
           ondismiss: () => setPaymentMessage("Checkout closed. Your job has not started; you can try payment again.")
         },
         theme: { color: "#2563eb" }
+      });
+      checkout.on("payment.failed", (response) => {
+        setPaymentMessage(response.error?.description || "Payment was not completed. Your video has not started processing; you can retry securely.");
       });
       checkout.open();
     } catch (err) {
