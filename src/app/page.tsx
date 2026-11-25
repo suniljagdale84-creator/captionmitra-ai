@@ -107,7 +107,7 @@ export default function Home() {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "media-upload";
       const result = await uploadPresigned(`incoming/${Date.now()}-${safeName}`, file, {
         access: "private",
-        // Vercel recommends multipart for files larger than 100 MB. The SDK splits and retries parts automatically.\n        multipart: file.size > 100 * 1024 * 1024,
+        // Large files use automatic multipart upload; customers still select one file.\n        multipart: file.size > 100 * 1024 * 1024,
         contentType: file.type,
         handleUploadUrl: "/api/upload",
         clientPayload: JSON.stringify({ turnstileToken: captchaToken }),
