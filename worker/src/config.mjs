@@ -25,6 +25,7 @@ export function loadWorkerConfig(env = process.env) {
     databaseUrl: env.DATABASE_URL,
     blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN,
     openAiApiKey: env.OPENAI_API_KEY,
+    transcriptionModel: env.TRANSCRIPTION_MODEL || "whisper-1",
     sharedSecret: secret,
     concurrency,
     port,
