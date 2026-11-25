@@ -86,3 +86,25 @@ test("reports failed payment attempt without changing the job's payable lifecycl
   assert.equal(status.inspection.status, "completed");
   assert.equal(status.downloads.available, false);
 });
+
+
+test("reports a partial refund without hiding the completed job", async () => {
+  const credential = createCustomerAccessToken();
+  const pool = { async query() { return { rows: [{
+    status: "completed", amount_paise: 3000, currency: "INR",
+    output_language: "English", progress_stage: "completed", progress_percent: 100,
+    payment_verified_at: new Date("2026-06-01T00:00:00Z"),
+    payment_attempt_status: "pending", refund_status: "partially_refunded",
+    refunded_amount_paise: 1000, result_blob_path: "private/result",
+    expires_at: new Date("2027-01-01T00:00:00Z"),
+    customer_access_token_hash: credential.tokenHash
+  }] }; }};
+  const status = await getCustomerJobStatus({
+    pool, jobId, accessToken: credential.token, now: Date.parse("2026-06-02")
+  });
+  assert.equal(status.status, "completed");
+  assert.equal(status.payment.status, "partially_refunded");
+  assert.equal(status.payment.amountPaise, 3000);
+  assert.equal(status.payment.refundedAmountPaise, 1000);
+  assert.equal(status.downloads.available, true);
+});
