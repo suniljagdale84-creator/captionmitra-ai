@@ -59,7 +59,7 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
             (job.refund_status === "failed" ? "refund_failed" :
               (job.payment_verified_at ? "verified" :
                 (job.payment_attempt_status === "failed" || job.status === "payment_failed" ? "failed" :
-                  (["awaiting_payment","uploaded","awaiting_upload"].includes(job.status) ? "pending" : "unknown"))))),
+                  (["awaiting_payment","uploaded","awaiting_upload"].includes(job.status) ? "pending" : "unknown")))))),
       amountPaise: Number.isSafeInteger(Number(job.amount_paise)) ? Number(job.amount_paise) : null,
       refundedAmountPaise: Number.isSafeInteger(Number(job.refunded_amount_paise)) ? Number(job.refunded_amount_paise) : 0,
       currency: job.currency || "INR"
