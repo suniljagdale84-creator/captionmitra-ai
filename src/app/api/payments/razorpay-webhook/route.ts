@@ -36,7 +36,8 @@ export async function POST(request: Request) {
     const refund = payload?.payload?.refund?.entity;
     if (!refund || typeof refund.id !== "string" ||
         typeof refund.payment_id !== "string" ||
-        !Number.isSafeInteger(refund.amount) ||
+        !Number.isSafeInteger(refund.amount) || refund.amount <= 0 ||
+        refund.currency !== "INR" ||
         !["processed", "failed"].includes(refund.status)) {
       return NextResponse.json({ error: "Invalid refund details." }, { status: 400 });
     }
@@ -60,33 +61,69 @@ export async function POST(request: Request) {
         await client.query("COMMIT");
         return NextResponse.json({ received: true, duplicate: true });
       }
+
       const found = await client.query(
-        "SELECT id, amount_paise, refund_status FROM caption_jobs WHERE provider_payment_id = $1 FOR UPDATE",
+        "SELECT id, amount_paise, refunded_amount_paise, refund_status FROM caption_jobs WHERE provider_payment_id = $1 FOR UPDATE",
         [refund.payment_id]
       );
       const job = found.rows[0];
-      if (job && refund.status === "processed" && Number(job.amount_paise) === refund.amount) {
+      if (!job) {
         await client.query(
-          "UPDATE caption_jobs SET refund_status = 'refunded', refunded_amount_paise = refunded_amount_paise + $2, refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
-          [job.id, refund.amount]
+          "UPDATE payment_webhook_events SET processed_at = NOW(), processing_error_code = 'payment_not_found' WHERE provider = 'razorpay' AND provider_event_id = $1",
+          [eventId]
         );
-      } else if (job && refund.status === "processed") {
+        await client.query("COMMIT");
+        return NextResponse.json({ received: true, reviewed: true });
+      }
+
+      const refundRecord = await client.query(
+        "SELECT amount_paise, currency, status FROM caption_payment_refunds WHERE provider = 'razorpay' AND provider_refund_id = $1 FOR UPDATE",
+        [refund.id]
+      );
+      const priorRefund = refundRecord.rows[0];
+      if (priorRefund && (Number(priorRefund.amount_paise) !== refund.amount || priorRefund.currency !== "INR")) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "Refund identifier was reused with different details." }, { status: 409 });
+      }
+      if (priorRefund?.status === "processed" && refund.status !== "processed") {
+        await client.query("COMMIT");
+        return NextResponse.json({ received: true, stale: true });
+      }
+
+      if (!priorRefund) {
         await client.query(
-          "UPDATE caption_jobs SET refund_status = 'partially_refunded', refunded_amount_paise = refunded_amount_paise + $2, refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
-          [job.id, refund.amount]
+          "INSERT INTO caption_payment_refunds (job_id, provider_refund_id, provider_payment_id, amount_paise, currency, status) VALUES ($1, $2, $3, $4, 'INR', $5)",
+          [job.id, refund.id, refund.payment_id, refund.amount, refund.status]
         );
-      } else if (job && refund.status === "failed") {
+      } else {
         await client.query(
-          "UPDATE caption_jobs SET refund_status = 'failed', updated_at = NOW() WHERE id = $1",
-          [job.id]
+          "UPDATE caption_payment_refunds SET status = $2, updated_at = NOW() WHERE provider = 'razorpay' AND provider_refund_id = $1",
+          [refund.id, refund.status]
         );
       }
+
+      const totals = await client.query(
+        "SELECT COALESCE(SUM(amount_paise) FILTER (WHERE status = 'processed'), 0)::bigint AS processed_paise FROM caption_payment_refunds WHERE job_id = $1",
+        [job.id]
+      );
+      const totalRefunded = Number(totals.rows[0]?.processed_paise || 0);
+      if (!Number.isSafeInteger(totalRefunded) || totalRefunded > Number(job.amount_paise)) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "Refund total exceeds captured payment; manual review required." }, { status: 409 });
+      }
+      const refundStatus = totalRefunded === 0
+        ? (refund.status === "failed" ? "failed" : "refund_pending")
+        : totalRefunded >= Number(job.amount_paise) ? "refunded" : "partially_refunded";
       await client.query(
-        "UPDATE payment_webhook_events SET processed_at = NOW(), processing_error_code = $2 WHERE provider = 'razorpay' AND provider_event_id = $1",
-        [eventId, job ? null : "payment_not_found"]
+        "UPDATE caption_jobs SET refund_status = $2, refunded_amount_paise = $3, refunded_at = CASE WHEN $3 > 0 THEN NOW() ELSE refunded_at END, updated_at = NOW() WHERE id = $1",
+        [job.id, refundStatus, totalRefunded]
+      );
+      await client.query(
+        "UPDATE payment_webhook_events SET processed_at = NOW() WHERE provider = 'razorpay' AND provider_event_id = $1",
+        [eventId]
       );
       await client.query("COMMIT");
-      return NextResponse.json({ received: true, reviewed: Boolean(job && refund.status === "processed" && Number(job.amount_paise) !== refund.amount) });
+      return NextResponse.json({ received: true, refundStatus, refundedAmountPaise: totalRefunded });
     } catch {
       await client.query("ROLLBACK").catch(() => {});
       return NextResponse.json({ error: "Refund webhook processing failed; provider may retry." }, { status: 500 });
