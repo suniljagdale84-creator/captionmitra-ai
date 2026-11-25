@@ -65,11 +65,11 @@ export async function POST(request: Request) {
       const job = found.rows[0];
       if (job?.status === "awaiting_payment") {
         await client.query(
-          "UPDATE caption_jobs SET status = 'payment_failed', error_code = 'razorpay_payment_failed', updated_at = NOW() WHERE id = $1",
+          "UPDATE caption_jobs SET payment_attempt_status = 'failed', error_code = 'razorpay_payment_failed', updated_at = NOW() WHERE id = $1 AND status = 'awaiting_payment'",
           [job.id]
         );
         await client.query(
-          "INSERT INTO caption_job_events (job_id, from_status, to_status, event_code) VALUES ($1, 'awaiting_payment', 'payment_failed', 'razorpay_payment_failed')",
+          "INSERT INTO caption_job_events (job_id, from_status, to_status, event_code) VALUES ($1, 'awaiting_payment', 'awaiting_payment', 'razorpay_payment_failed')",
           [job.id]
         );
       }
