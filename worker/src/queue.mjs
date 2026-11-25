@@ -4,7 +4,9 @@ const CLAIM_SQL = `
     FROM caption_jobs
     WHERE status = 'queued'
       AND available_at <= NOW()
-      AND retry_count <= max_retries\n      AND payment_verified_at IS NOT NULL\n      AND provider_payment_id IS NOT NULL
+      AND retry_count <= max_retries
+      AND payment_verified_at IS NOT NULL
+      AND provider_payment_id IS NOT NULL
     ORDER BY available_at ASC, created_at ASC
     FOR UPDATE SKIP LOCKED
     LIMIT 1
