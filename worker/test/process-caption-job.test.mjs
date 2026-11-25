@@ -35,7 +35,7 @@ test("creates private SRT/TXT result and completes the owned job", async () => {
 test("deletes orphaned result if job ownership was lost", async () => {
   let deleted = false;
   await assert.rejects(processCaptionJob(job, "worker-1", config, {
-    pool: {},
+    pool: { query: async () => ({ rows: [{ id: job.id }] }) },
     prepareTranscript: async () => ({
       srt: "caption",
       txt: "caption",
