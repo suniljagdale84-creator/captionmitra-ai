@@ -26,7 +26,7 @@ Do not deploy this branch to production until the relevant checks pass.
 3. Build a separate worker service suitable for Ubuntu VPS with FFmpeg, bounded concurrency, job status, retries, and guaranteed cleanup in a finally path.
 4. Add transcription/translation adapters with configurable provider/model and server-side cost/size/time limits.
 5. Connect results to the existing editable subtitle UI and SRT/TXT exports.
-6. Add server-side price calculation (ceil duration to billable minutes, minimum INR 10) and payment gateway order/webhook verification. Confirm rounding/refund policy before production.
+6. Add server-side price calculation at INR 3/minute prorated by exact measured duration, rounded up to the nearest paise, with a minimum INR 10, plus payment gateway order/webhook verification. Confirm refund policy before production.
 7. Add abuse controls, privacy/retention policy, logs without media contents, and automated tests.
 8. Run end-to-end tests on a staging environment before VPS purchase.
 9. Only after acceptance, purchase the monthly VPS and deploy.
