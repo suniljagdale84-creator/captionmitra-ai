@@ -26,6 +26,7 @@ export function loadWorkerConfig(env = process.env) {
     blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN,
     openAiApiKey: env.OPENAI_API_KEY,
     transcriptionModel: env.TRANSCRIPTION_MODEL || "whisper-1",
+    translationModel: env.TRANSLATION_MODEL || "gpt-4o-mini",
     sharedSecret: secret,
     concurrency,
     port,
