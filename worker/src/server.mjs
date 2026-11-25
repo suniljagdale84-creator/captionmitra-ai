@@ -98,7 +98,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   const url = new URL(request.url || "/", "http://127.0.0.1");
-  const statusMatch = url.pathname.match(/^\\/api\\/customer\\/jobs\\/([0-9a-f-]{36})$/i);
+  const statusMatch = url.pathname.match(/^\/api\/customer\/jobs\/([0-9a-f-]{36})$/i);
   if (request.method === "GET" && statusMatch) {
     const accessToken = request.headers["x-customer-access-token"];
     try {
@@ -114,7 +114,7 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  const downloadMatch = url.pathname.match(/^\\/api\\/customer\\/jobs\\/([0-9a-f-]{36})\\/download$/i);
+  const downloadMatch = url.pathname.match(/^\/api\/customer\/jobs\/([0-9a-f-]{36})\/download$/i);
   if (request.method === "GET" && downloadMatch) {
     const accessToken = request.headers["x-customer-access-token"];
     const format = url.searchParams.get("format");
