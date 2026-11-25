@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { downloadPrivateBlob } from "./blob-storage.mjs";
 import { probeMedia } from "./media-tools.mjs";
@@ -133,6 +133,7 @@ export async function inspectOneUploadedMedia({ pool, config, workerId = randomU
     if (!Number.isSafeInteger(size) || size < 1 || size > config.maxInputBytes) {
       throw new Error("invalid_media_size");
     }
+    await mkdir(config.tempDir, { recursive: true, mode: 0o700 });
     workDir = await makeTempDir(join(config.tempDir, "captionmitra-inspect-"));
     const sourcePath = join(workDir, "source.media");
     const downloaded = await download({
