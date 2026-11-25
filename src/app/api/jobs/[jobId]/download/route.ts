@@ -1,7 +1,7 @@
 import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
-import { getCustomerDownload } from "@/lib/customer-download";
+import { getCustomerDownload } from "@/lib/customer-download.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
