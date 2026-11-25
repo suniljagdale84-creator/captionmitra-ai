@@ -19,5 +19,5 @@ test("public progress contains only safe status fields", () => {
     status: "processing", stage: "translating", percent: 75
   });
   assert.equal(getPublicProgress("not-a-status", "private-path", 500).status, "unknown");
-  assert.equal(getPublicProgress("processing", "private-path", 500).percent, 0);
+  assert.deepEqual(getPublicProgress("processing", "private-path", 500), { status: "processing", stage: "queued", percent: 0 });
 });
