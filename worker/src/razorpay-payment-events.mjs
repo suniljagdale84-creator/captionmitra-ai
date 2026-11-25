@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, createHash } from "node:crypto";
 
 function verify(rawBody, signature, secret) {
   if (!Buffer.isBuffer(rawBody) || typeof secret !== "string" || !secret ||
@@ -24,9 +24,9 @@ export async function applyRazorpayPaymentFailedEvent(pool, {
     await client.query("BEGIN");
     const inserted = await client.query(
       `INSERT INTO payment_webhook_events (provider, provider_event_id, payload_sha256)
-       VALUES ('razorpay', $1, encode(digest($2, 'sha256'), 'hex'))
+       VALUES ('razorpay', $1, $2)
        ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING provider_event_id`,
-      [eventId, rawBody]
+      [eventId, createHash("sha256").update(rawBody).digest("hex")]
     );
     if (!inserted.rows.length) {
       await client.query("COMMIT");
