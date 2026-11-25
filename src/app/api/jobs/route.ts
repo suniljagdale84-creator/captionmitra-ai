@@ -80,8 +80,15 @@ export async function POST(request: Request) {
       await client.query("INSERT INTO caption_job_events (job_id, from_status, to_status, event_code) VALUES ($1, NULL, 'awaiting_payment', 'upload_verified_job_created')", [job.id]);
     }
 
+    // Queue server-side FFprobe inspection before a payment order can be created.
+    // The browser's media.duration is display-only and is never used for billing.
+    await client.query(
+      "INSERT INTO caption_media_inspections (job_id) VALUES ($1) ON CONFLICT (job_id) DO NOTHING",
+      [job.id]
+    );
+
     await client.query("COMMIT");
-    return NextResponse.json({ jobId: job.id, status: job.status, customerAccessToken, message: "Upload verified and job created. Payment is not enabled yet." }, { status: inserted.rows[0] ? 201 : 200, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ jobId: job.id, status: job.status, inspectionStatus: "pending", customerAccessToken, message: "Upload verified. Server-side media inspection is queued before payment." }, { status: inserted.rows[0] ? 201 : 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (client) await client.query("ROLLBACK").catch(() => {});
     const message = error instanceof Error ? error.message : "";
