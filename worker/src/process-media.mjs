@@ -34,6 +34,7 @@ export async function withPreparedMedia(job, config, consumeChunks, dependencies
     const audioPath = join(workDir, "audio.mp3");
     const chunksDir = join(workDir, "chunks");
 
+    await dependencies.onStage?.("downloading");
     const downloaded = await download({
       pathname: job.source_blob_path,
       token: config.blobReadWriteToken,
@@ -49,6 +50,7 @@ export async function withPreparedMedia(job, config, consumeChunks, dependencies
       throw new Error("Uploaded media size does not match the stored job record");
     }
 
+    await dependencies.onStage?.("extracting_audio");
     const metadata = await probe(sourcePath);
     if (metadata.durationSeconds > config.maxJobDurationSeconds) {
       throw new Error("Media duration exceeds the supported limit");
