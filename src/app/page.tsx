@@ -44,7 +44,10 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
-  const [uploaded, setUploaded] = useState(false);\n  const [uploadedPath, setUploadedPath] = useState("");\n  const [idempotencyKey, setIdempotencyKey] = useState("");\n  const [jobInfo, setJobInfo] = useState<{ jobId: string; status: string; customerAccessToken: string } | null>(null);
+  const [uploaded, setUploaded] = useState(false);
+  const [uploadedPath, setUploadedPath] = useState("");
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [jobInfo, setJobInfo] = useState<{ jobId: string; status: string; customerAccessToken: string } | null>(null);
   const captchaRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
 
@@ -81,6 +84,9 @@ export default function Home() {
     setFile(next);
     setError("");
     setUploaded(false);
+    setUploadedPath("");
+    setIdempotencyKey("");
+    setJobInfo(null);
     setProgress(0);
     setCaptchaToken("");
     if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
@@ -115,11 +121,39 @@ export default function Home() {
       });
       if (!result.pathname) throw new Error("Upload completed without a storage reference.");
       setUploaded(true);
+      setUploadedPath(result.pathname);
+      setIdempotencyKey(crypto.randomUUID());
       setProgress(100);
       setCaptchaToken("");
       if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createJob() {
+    if (!uploadedPath || !idempotencyKey) { setError("Please upload your file first."); return; }
+    if (!captchaToken) { setError("Please complete the new security check before creating your job."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ pathname: uploadedPath, language, idempotencyKey, turnstileToken: captchaToken })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not create your job.");
+      setJobInfo({ jobId: data.jobId, status: data.status, customerAccessToken: data.customerAccessToken });
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create your job. Please try again.");
       setCaptchaToken("");
       if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
     } finally {
@@ -164,7 +198,9 @@ export default function Home() {
           {busy ? <><Loader2 className="spin" size={18}/> Uploading…</> : <><UploadCloud size={18}/> Upload securely</>}
         </button>
         {error && <div className="error">{error}</div>}
-        {uploaded && !jobInfo && <div className="success"><CheckCircle2 size={17}/> File uploaded to private temporary storage. Complete the security check again, then create your job.</div>}\n        {uploaded && !jobInfo && <button className="generate" onClick={createJob} disabled={busy || !captchaToken}><CheckCircle2 size={18}/> Create my job securely</button>}\n        {jobInfo && <div className="success"><CheckCircle2 size={17}/> Job created: {jobInfo.jobId}. Status: {jobInfo.status}. Payment and processing are not enabled yet. <br/>Save this one-time download key securely: <strong>{jobInfo.customerAccessToken}</strong></div>}
+        {uploaded && !jobInfo && <div className="success"><CheckCircle2 size={17}/> File uploaded to private temporary storage. Complete the security check again, then create your job.</div>}
+        {uploaded && !jobInfo && <button className="generate" onClick={createJob} disabled={busy || !captchaToken}><CheckCircle2 size={18}/> Create my job securely</button>}
+        {jobInfo && <div className="success"><CheckCircle2 size={17}/> Job created: {jobInfo.jobId}. Status: {jobInfo.status}. Payment and processing are not enabled yet. <br/>Save this one-time download key securely: <strong>{jobInfo.customerAccessToken}</strong></div>}
         <p className="sub" style={{fontSize:13,marginTop:16}}>Your file is stored privately. Do not upload confidential material during this setup test. Automatic deletion will be connected with the processing worker before launch.</p>
       </section>
       <footer><span>© 2026 CaptionMitra AI</span><span>Made for creators <FileVideo size={14}/></span></footer>
