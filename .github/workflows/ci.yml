@@ -41,6 +41,10 @@ jobs:
             echo "Applying $migration"
             psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f "$migration"
           done
+      - name: Test PostgreSQL payment and refund persistence
+        env:
+          PGPASSWORD: ci-only-password
+        run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/tests/payment_refund_schema_test.sql
       - name: Install worker dependencies
         working-directory: worker
         run: npm install --no-audit --no-fund
