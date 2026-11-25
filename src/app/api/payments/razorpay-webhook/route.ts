@@ -32,6 +32,66 @@ export async function POST(request: Request) {
 
   let payload: any;
   try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid webhook payload." }, { status: 400 }); }
+  if (payload?.event === "refund.processed" || payload?.event === "refund.failed") {
+    const refund = payload?.payload?.refund?.entity;
+    if (!refund || typeof refund.id !== "string" ||
+        typeof refund.payment_id !== "string" ||
+        !Number.isSafeInteger(refund.amount) ||
+        !["processed", "failed"].includes(refund.status)) {
+      return NextResponse.json({ error: "Invalid refund details." }, { status: 400 });
+    }
+    const digest = createHash("sha256").update(raw).digest("hex");
+    const client = await pool().connect();
+    try {
+      await client.query("BEGIN");
+      const inserted = await client.query(
+        "INSERT INTO payment_webhook_events (provider, provider_event_id, payload_sha256) VALUES ('razorpay', $1, $2) ON CONFLICT DO NOTHING RETURNING provider_event_id",
+        [eventId, digest]
+      );
+      if (!inserted.rowCount) {
+        const prior = await client.query(
+          "SELECT payload_sha256 FROM payment_webhook_events WHERE provider = 'razorpay' AND provider_event_id = $1",
+          [eventId]
+        );
+        if (prior.rows[0]?.payload_sha256 !== digest) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "Webhook event identifier was reused with a different payload." }, { status: 409 });
+        }
+        await client.query("COMMIT");
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      const found = await client.query(
+        "SELECT id, amount_paise, refund_status FROM caption_jobs WHERE provider_payment_id = $1 FOR UPDATE",
+        [refund.payment_id]
+      );
+      const job = found.rows[0];
+      if (job && refund.status === "processed" && Number(job.amount_paise) === refund.amount) {
+        await client.query(
+          "UPDATE caption_jobs SET refund_status = 'refunded', refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
+          [job.id]
+        );
+      } else if (job && refund.status === "failed") {
+        await client.query(
+          "UPDATE caption_jobs SET refund_status = 'failed', updated_at = NOW() WHERE id = $1",
+          [job.id]
+        );
+      } else if (job && refund.status === "processed") {
+        await client.query(
+          "UPDATE caption_jobs SET refund_status = 'refund_pending', updated_at = NOW() WHERE id = $1",
+          [job.id]
+        );
+      }
+      await client.query(
+        "UPDATE payment_webhook_events SET processed_at = NOW(), processing_error_code = $2 WHERE provider = 'razorpay' AND provider_event_id = $1",
+        [eventId, job ? null : "payment_not_found"]
+      );
+      await client.query("COMMIT");
+      return NextResponse.json({ received: true, reviewed: Boolean(job && refund.status === "processed" && Number(job.amount_paise) !== refund.amount) });
+    } catch {
+      await client.query("ROLLBACK").catch(() => {});
+      return NextResponse.json({ error: "Refund webhook processing failed; provider may retry." }, { status: 500 });
+    } finally { client.release(); }
+  }
   if (payload?.event === "payment.failed") {
     const failedPayment = payload?.payload?.payment?.entity;
     if (!failedPayment || typeof failedPayment.id !== "string" ||
