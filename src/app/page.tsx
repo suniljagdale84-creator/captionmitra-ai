@@ -107,11 +107,13 @@ export default function Home() {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "media-upload";
       const result = await upload(`incoming/${Date.now()}-${safeName}`, file, {
         access: "private",
+        multipart: true,
+        contentType: file.type,
         handleUploadUrl: "/api/upload",
         clientPayload: JSON.stringify({ turnstileToken: captchaToken }),
         onUploadProgress: ({ percentage }) => setProgress(Math.round(percentage)),
       });
-      if (!result.pathname || !result.url) throw new Error("Upload completed without a storage reference.");
+      if (!result.pathname) throw new Error("Upload completed without a storage reference.");
       setUploaded(true);
       setProgress(100);
       setCaptchaToken("");
