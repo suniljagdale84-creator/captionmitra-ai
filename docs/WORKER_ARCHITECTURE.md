@@ -87,3 +87,11 @@ Transitions must be server-controlled. Payment and job transitions must be idemp
 - Production VPS purchase and deployment.
 
 No production deployment or paid infrastructure purchase is authorized by this design.
+
+
+## Subtitle translation stage
+
+- Whisper transcription requests verbose timestamped segments.
+- The translation helper sends ordered groups of up to 40 subtitle lines to the configured chat model and validates one returned string per source segment.
+- Translated captions keep the source segment start/end timestamps; `output_language` is read from the stored job row. `original`, `source`, or `same` bypasses translation.
+- The combined preparation helper returns SRT/TXT content in memory. The queue consumer, private output upload, and user download endpoint are still not connected.
