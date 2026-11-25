@@ -3,7 +3,7 @@ import { getPublicProgress } from "./job-progress.mjs";
 
 const PUBLIC_STATUSES = new Set([
   "awaiting_upload","uploaded","awaiting_payment","paid","queued","processing",
-  "completed","payment_failed","processing_failed","expired","cancelled"
+  "completed","payment_failed","processing_failed","expired","cancelled","refunded"
 ]);
 
 export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Date.now() }) {
@@ -55,6 +55,7 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
     payment: {
       status: job.payment_verified_at ? "verified" :
         (job.status === "payment_failed" ? "failed" :
+          (job.status === "refunded" ? "refunded" :
           (["awaiting_payment","uploaded","awaiting_upload"].includes(job.status) ? "pending" : "unknown")),
       amountPaise: Number.isSafeInteger(Number(job.amount_paise)) ? Number(job.amount_paise) : null,
       currency: job.currency || "INR"
