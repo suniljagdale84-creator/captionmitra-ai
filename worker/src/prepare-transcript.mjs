@@ -9,6 +9,7 @@ export async function prepareTranscript(job, config, dependencies = {}) {
   const translate = dependencies.translateTranscriptSegments || translateTranscriptSegments;
 
   return withPreparedMedia(job, config, async ({ chunks, metadata }) => {
+    await dependencies.onStage?.("transcribing");
     const transcript = await transcribe(chunks, {
       apiKey: config.openAiApiKey,
       model: config.transcriptionModel || "whisper-1",
@@ -17,6 +18,7 @@ export async function prepareTranscript(job, config, dependencies = {}) {
       fetchImpl: dependencies.fetchImpl || fetch
     });
     const targetLanguage = normalizeOutputLanguage(job.output_language);
+    await dependencies.onStage?.("translating");
     const outputSegments = await translate(transcript.segments, {
       apiKey: config.openAiApiKey,
       targetLanguage,
