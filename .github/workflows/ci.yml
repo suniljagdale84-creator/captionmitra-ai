@@ -9,6 +9,20 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: captionmitra
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: captionmitra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U captionmitra -d captionmitra_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -18,6 +32,10 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Validate PostgreSQL migration
+        env:
+          PGPASSWORD: ci-only-password
+        run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_schema.sql
       - name: Build Next.js application
         run: npm run build
         env:
