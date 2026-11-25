@@ -60,3 +60,23 @@ test("rejects oversized Blob before writing", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("enforces the byte limit while streaming when metadata size is absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "captionmitra-test-"));
+  try {
+    await assert.rejects(() => downloadPrivateBlob({
+      pathname: "uploads/video.mp4",
+      token: "test-token",
+      destination: join(root, "video.mp4"),
+      tempDir: root,
+      maxBytes: 5,
+      getBlob: async () => ({
+        statusCode: 200,
+        stream: new Blob(["123456"]).stream(),
+        blob: { size: null, contentType: "video/mp4" }
+      })
+    }), /exceeds the configured size limit/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
