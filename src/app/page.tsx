@@ -2,7 +2,7 @@
 
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
-import { upload } from "@vercel/blob/client";
+import { uploadPresigned } from "@vercel/blob/client";
 import { UploadCloud, Captions, Languages, Loader2, FileVideo, CheckCircle2, ShieldCheck } from "lucide-react";
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
@@ -105,7 +105,7 @@ export default function Home() {
     setProgress(0);
     try {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "media-upload";
-      const result = await upload(`incoming/${Date.now()}-${safeName}`, file, {
+      const result = await uploadPresigned(`incoming/${Date.now()}-${safeName}`, file, {
         access: "private",
         // Vercel recommends multipart for files larger than 100 MB. The SDK splits and retries parts automatically.\n        multipart: file.size > 100 * 1024 * 1024,
         contentType: file.type,
