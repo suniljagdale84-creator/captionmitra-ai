@@ -4,8 +4,8 @@ import { downloadPrivateBlob } from "./blob-storage.mjs";
 import { probeMedia, extractAudio, splitAudioIntoChunks } from "./media-tools.mjs";
 
 const ALLOWED_CONTENT_TYPES = new Set([
-  "video/mp4", "video/quicktime", "video/x-matroska", "video/webm",
-  "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac"
+  "video/mp4", "video/quicktime", "video/x-matroska", "video/webm", "video/x-msvideo",
+  "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac", "audio/ogg", "audio/flac", "audio/webm"
 ]);
 
 export async function withPreparedMedia(job, config, consumeChunks, dependencies = {}) {
