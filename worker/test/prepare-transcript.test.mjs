@@ -12,14 +12,16 @@ test("creates timestamped SRT and plain text transcript", async () => {
       id: "job-123",
       source_blob_path: "uploads/test.mp4",
       source_content_type: "video/mp4",
-      source_size_bytes: "100"
+      source_size_bytes: "100",
+      output_language: "Hindi"
     }, {
       tempDir: root,
       maxInputBytes: 200 * 1024 * 1024,
       maxJobDurationSeconds: 10800,
       blobReadWriteToken: "test",
       openAiApiKey: "test",
-      transcriptionModel: "whisper-1"
+      transcriptionModel: "whisper-1",
+      translationModel: "gpt-4o-mini"
     }, {
       mediaDependencies: {
         downloadPrivateBlob: async ({ destination }) => {
@@ -39,6 +41,10 @@ test("creates timestamped SRT and plain text transcript", async () => {
           await writeFile(path, "chunk");
           return [{ path, sizeBytes: 5, index: 0 }];
         }
+      },
+      translateTranscriptSegments: async (segments, options) => {
+        assert.equal(options.targetLanguage, "Hindi");
+        return segments.map((segment) => ({ ...segment, text: "नमस्ते CaptionMitra" }));
       },
       transcribeChunks: async (_chunks, options) => {
         assert.equal(options.model, "whisper-1");
