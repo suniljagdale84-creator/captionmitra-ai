@@ -47,9 +47,13 @@ export async function claimNextJob(pool, workerId) {
   }
 }
 
-export async function markJobRetryableFailure(pool, jobId, errorCode) {
+export async function markJobRetryableFailure(pool, jobId, workerId, errorCode) {
   if (typeof errorCode !== "string" || !/^[a-z0-9_]{1,64}$/i.test(errorCode)) {
     throw new Error("Invalid error code");
+  }
+
+  if (typeof workerId !== "string" || workerId.length < 1 || workerId.length > 128) {
+    throw new Error("Invalid worker identifier");
   }
 
   const result = await pool.query(
@@ -62,16 +66,20 @@ export async function markJobRetryableFailure(pool, jobId, errorCode) {
          locked_by = NULL,
          error_code = $2,
          updated_at = NOW()
-     WHERE id = $1 AND status = 'processing'
+     WHERE id = $1 AND status = 'processing' AND locked_by = $3
      RETURNING id, status, retry_count`,
-    [jobId, errorCode]
+    [jobId, errorCode, workerId]
   );
   return result.rows[0] ?? null;
 }
 
-export async function completeJob(pool, jobId, resultBlobPath) {
+export async function completeJob(pool, jobId, workerId, resultBlobPath) {
   if (typeof resultBlobPath !== "string" || resultBlobPath.length < 1 || resultBlobPath.length > 1024) {
     throw new Error("Invalid result storage path");
+  }
+
+  if (typeof workerId !== "string" || workerId.length < 1 || workerId.length > 128) {
+    throw new Error("Invalid worker identifier");
   }
 
   const client = await pool.connect();
@@ -82,9 +90,9 @@ export async function completeJob(pool, jobId, resultBlobPath) {
        SET status = 'completed', result_blob_path = $2,
            locked_at = NULL, locked_by = NULL,
            error_code = NULL, updated_at = NOW()
-       WHERE id = $1 AND status = 'processing'
+       WHERE id = $1 AND status = 'processing' AND locked_by = $3
        RETURNING id`,
-      [jobId, resultBlobPath]
+      [jobId, resultBlobPath, workerId]
     );
     if (updated.rows[0]) {
       await client.query(
