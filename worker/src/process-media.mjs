@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { downloadPrivateBlob } from "./blob-storage.mjs";
 import { probeMedia, extractAudio, splitAudioIntoChunks } from "./media-tools.mjs";
@@ -27,6 +27,7 @@ export async function withPreparedMedia(job, config, consumeChunks, dependencies
   const extract = dependencies.extractAudio || extractAudio;
   const split = dependencies.splitAudioIntoChunks || splitAudioIntoChunks;
 
+  await mkdir(config.tempDir, { recursive: true, mode: 0o700 });
   const workDir = await makeTempDir(join(config.tempDir, "captionmitra-job-"));
   try {
     const sourcePath = join(workDir, "source.media");
@@ -41,6 +42,9 @@ export async function withPreparedMedia(job, config, consumeChunks, dependencies
       maxBytes: config.maxInputBytes
     });
 
+    if (downloaded.contentType && downloaded.contentType.toLowerCase() !== job.source_content_type.toLowerCase()) {
+      throw new Error("Uploaded media content type does not match the stored job record");
+    }
     if (downloaded.sizeBytes !== Number(job.source_size_bytes)) {
       throw new Error("Uploaded media size does not match the stored job record");
     }
