@@ -66,37 +66,6 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  if (!isAuthorized(request)) {
-    send(response, 401, { error: "unauthorized" });
-    return;
-  }
-
-  if (request.method === "GET" && request.url === "/internal/worker/status") {
-    try {
-      const [jobs, cleanup] = await Promise.all([
-        pool.query("SELECT COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs, COUNT(*) FILTER (WHERE status = 'processing')::int AS processing_jobs FROM caption_jobs"),
-        getCleanupStats(pool)
-      ]);
-      send(response, 200, {
-        ok: true,
-        service: "captionmitra-worker",
-        queuedJobs: jobs.rows[0].queued_jobs,
-        processingJobs: jobs.rows[0].processing_jobs,
-        cleanupScheduler: "running",
-        cleanup
-      });
-    } catch {
-      send(response, 503, { error: "database_unavailable" });
-    }
-    return;
-  }
-
-  if (request.method === "POST" && request.url === "/internal/worker/cleanup/run") {
-    const result = await cleanupScheduler.run();
-    send(response, 200, result);
-    return;
-  }
-
   const url = new URL(request.url || "/", "http://127.0.0.1");
   const statusMatch = url.pathname.match(/^\/api\/customer\/jobs\/([0-9a-f-]{36})$/i);
   if (request.method === "GET" && statusMatch) {
@@ -142,10 +111,42 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+
+  if (!isAuthorized(request)) {
+    send(response, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (request.method === "GET" && request.url === "/internal/worker/status") {
+    try {
+      const [jobs, cleanup] = await Promise.all([
+        pool.query("SELECT COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs, COUNT(*) FILTER (WHERE status = 'processing')::int AS processing_jobs FROM caption_jobs"),
+        getCleanupStats(pool)
+      ]);
+      send(response, 200, {
+        ok: true,
+        service: "captionmitra-worker",
+        queuedJobs: jobs.rows[0].queued_jobs,
+        processingJobs: jobs.rows[0].processing_jobs,
+        cleanupScheduler: "running",
+        cleanup
+      });
+    } catch {
+      send(response, 503, { error: "database_unavailable" });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/internal/worker/cleanup/run") {
+    const result = await cleanupScheduler.run();
+    send(response, 200, result);
+    return;
+  }
+
   send(response, 404, { error: "not_found" });
 });
 
-server.listen(config.port || 8080, "127.0.0.1", () => {
+server.listen(config.port || 8080, process.env.WORKER_HOST || "127.0.0.1", () => {
   process.stdout.write("CaptionMitra worker API started on loopback.\\n");
 });
 
