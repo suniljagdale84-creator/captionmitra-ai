@@ -43,6 +43,10 @@ export default function Home() {
   const [captchaToken, setCaptchaToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [customerStatus, setCustomerStatus] = useState<any>(null);
+  const [statusError, setStatusError] = useState("");
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
   const [uploaded, setUploaded] = useState(false);
   const [uploadedPath, setUploadedPath] = useState("");
@@ -50,6 +54,58 @@ export default function Home() {
   const [jobInfo, setJobInfo] = useState<{ jobId: string; status: string; customerAccessToken: string } | null>(null);
   const captchaRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!file) { setDurationSeconds(null); return; }
+    const media = document.createElement(file.type.startsWith("audio/") ? "audio" : "video");
+    const objectUrl = URL.createObjectURL(file);
+    media.preload = "metadata";
+    media.onloadedmetadata = () => setDurationSeconds(Number.isFinite(media.duration) ? media.duration : null);
+    media.onerror = () => setDurationSeconds(null);
+    media.src = objectUrl;
+    return () => { URL.revokeObjectURL(objectUrl); media.removeAttribute("src"); };
+  }, [file]);
+
+  useEffect(() => {
+    if (!jobInfo) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/customer/jobs/${jobInfo.jobId}`, {
+          headers: { "x-customer-access-token": jobInfo.customerAccessToken }, cache: "no-store"
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Status is temporarily unavailable.");
+        if (!cancelled) { setCustomerStatus(data); setStatusError(""); }
+      } catch (err) {
+        if (!cancelled) setStatusError(err instanceof Error ? err.message : "Status is temporarily unavailable.");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 8000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [jobInfo]);
+
+  const estimatedPaise = durationSeconds == null ? null : Math.max(1000, Math.ceil(durationSeconds * 5));
+
+  async function downloadCaption(format: "srt" | "txt") {
+    if (!jobInfo) return;
+    setDownloading(true);
+    setStatusError("");
+    try {
+      const response = await fetch(`/api/customer/jobs/${jobInfo.jobId}/download?format=${format}`, {
+        headers: { "x-customer-access-token": jobInfo.customerAccessToken }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Download is not available yet.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = `captions.${format}`; anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setStatusError(err instanceof Error ? err.message : "Download failed.");
+    } finally { setDownloading(false); }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -189,7 +245,7 @@ export default function Home() {
           <label className="fieldLabel" htmlFor="language"><Languages size={16}/> OUTPUT LANGUAGE</label>
           <select id="language" value={language} onChange={e => setLanguage(e.target.value)} disabled={busy}>{languages.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
         </div>
-        <p className="fieldLabel">SECURITY VERIFICATION</p>
+        <div className="pricePreview">\n          <div><span className="fieldLabel">ESTIMATED PRICE</span><strong>{estimatedPaise == null ? "Duration pending" : `₹${(estimatedPaise / 100).toFixed(2)}`}</strong><small>{durationSeconds == null ? "Select a file with readable duration metadata" : `${Math.floor(durationSeconds / 60)}m ${Math.floor(durationSeconds % 60)}s · ₹3/min · ₹10 minimum`}</small></div>\n          <span className="priceTag">No subscription</span>\n        </div>\n        <p className="fieldLabel">SECURITY VERIFICATION</p>
         <div ref={captchaRef} />
         {!siteKey && <small>Loading secure verification…</small>}
         {busy && <div className="success"><Loader2 className="spin" size={17}/> Uploading securely… {progress}%</div>}
@@ -200,7 +256,16 @@ export default function Home() {
         {error && <div className="error">{error}</div>}
         {uploaded && !jobInfo && <div className="success"><CheckCircle2 size={17}/> File uploaded to private temporary storage. Complete the security check again, then create your job.</div>}
         {uploaded && !jobInfo && <button className="generate" onClick={createJob} disabled={busy || !captchaToken}><CheckCircle2 size={18}/> Create my job securely</button>}
-        {jobInfo && <div className="success"><CheckCircle2 size={17}/> Job created: {jobInfo.jobId}. Status: {jobInfo.status}. Payment and processing are not enabled yet. <br/>Save this one-time download key securely: <strong>{jobInfo.customerAccessToken}</strong></div>}
+        {jobInfo && <div className="customerDashboard">
+          <div className="dashboardTitle"><div><span className="fieldLabel">YOUR JOB</span><h3>Processing dashboard</h3></div><span className="statusPill">{customerStatus?.status || jobInfo.status}</span></div>
+          <p className="jobId">Job ID: {jobInfo.jobId}</p>
+          <div className="progressMeta"><strong>{customerStatus?.stage || "Waiting for status"}</strong><b>{customerStatus?.progressPercent ?? 0}%</b></div>
+          <div className="progressTrack"><div style={{ width: `${customerStatus?.progressPercent ?? 0}%` }} /></div>
+          <div className="dashboardFacts"><div><small>PAYMENT</small><strong>{customerStatus?.payment?.status || "Not enabled"}</strong></div><div><small>OUTPUT</small><strong>{customerStatus?.outputLanguage || language}</strong></div><div><small>PRICE</small><strong>{estimatedPaise == null ? "Pending" : `₹${(estimatedPaise / 100).toFixed(2)}`}</strong></div></div>
+          {customerStatus?.downloads?.available && <div className="downloads"><button onClick={() => downloadCaption("srt")} disabled={downloading}>Download SRT</button><button onClick={() => downloadCaption("txt")} disabled={downloading}>Download TXT</button></div>}
+          {statusError && <div className="error">{statusError}</div>}
+          <details className="accessDetails"><summary>Show your private access key</summary><code>{jobInfo.customerAccessToken}</code><small>Keep this key private. Anyone with it may access this job's status and results.</small></details>
+        </div>}
         <p className="sub" style={{fontSize:13,marginTop:16}}>Your file is stored privately. Do not upload confidential material during this setup test. Automatic deletion will be connected with the processing worker before launch.</p>
       </section>
       <footer><span>© 2026 CaptionMitra AI</span><span>Made for creators <FileVideo size={14}/></span></footer>
