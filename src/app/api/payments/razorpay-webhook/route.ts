@@ -49,6 +49,15 @@ export async function POST(request: Request) {
       [eventId, digest]
     );
     if (!event.rowCount) {
+      const prior = await client.query(
+        "SELECT payload_sha256 FROM payment_webhook_events WHERE provider = 'razorpay' AND provider_event_id = $1",
+        [eventId]
+      );
+      const priorDigest = prior.rows[0]?.payload_sha256;
+      if (typeof priorDigest !== "string" || priorDigest !== digest) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "Webhook event identifier was reused with a different payload." }, { status: 409 });
+      }
       await client.query("COMMIT");
       return NextResponse.json({ received: true, duplicate: true });
     }
