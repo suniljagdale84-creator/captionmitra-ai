@@ -92,7 +92,12 @@ export default function Home() {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Status is temporarily unavailable.");
-        if (!cancelled) { setCustomerStatus(data); setStatusError(""); }
+        if (!cancelled) {
+          setCustomerStatus(data);
+          setStatusError("");
+          if (data.payment?.status === "verified") setPaymentMessage("Payment verified securely. Your video is now in the processing queue.");
+          else if (data.payment?.status === "failed") setPaymentMessage("Payment was not completed. You can retry securely.");
+        }
       } catch (err) {
         if (!cancelled) setStatusError(err instanceof Error ? err.message : "Status is temporarily unavailable.");
       }
