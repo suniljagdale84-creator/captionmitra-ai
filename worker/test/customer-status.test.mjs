@@ -59,3 +59,30 @@ test("reports completed job expired and hides downloads", async () => {
 test("rejects invalid job identifiers", async () => {
   await assert.rejects(getCustomerJobStatus({ pool: { query: async () => ({ rows: [] }) }, jobId: "bad", accessToken: "bad" }), /Invalid job identifier/);
 });
+
+
+test("reports failed payment attempt without changing the job's payable lifecycle", async () => {
+  const credential = createCustomerAccessToken();
+  const pool = { async query(statement, values) {
+    assert.match(statement, /payment_attempt_status/);
+    assert.match(statement, /caption_media_inspections/);
+    assert.deepEqual(values, [jobId]);
+    return { rows: [{
+      status: "awaiting_payment", amount_paise: 1205, currency: "INR",
+      output_language: "Hindi", progress_stage: "awaiting_payment",
+      progress_percent: 0, progress_updated_at: null,
+      payment_verified_at: null, payment_attempt_status: "failed",
+      inspection_status: "completed", inspection_error_code: null,
+      result_blob_path: null, expires_at: new Date("2027-01-01T00:00:00Z"),
+      customer_access_token_hash: credential.tokenHash
+    }] };
+  }};
+  const status = await getCustomerJobStatus({
+    pool, jobId, accessToken: credential.token, now: Date.parse("2026-06-01")
+  });
+  assert.equal(status.status, "awaiting_payment");
+  assert.equal(status.payment.status, "failed");
+  assert.equal(status.payment.amountPaise, 1205);
+  assert.equal(status.inspection.status, "completed");
+  assert.equal(status.downloads.available, false);
+});
