@@ -20,7 +20,7 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
   const result = await pool.query(
     `SELECT caption_jobs.status, amount_paise, currency, output_language,
             progress_stage, progress_percent, progress_updated_at,
-            payment_verified_at, result_blob_path, expires_at,
+            payment_verified_at, payment_attempt_status, result_blob_path, expires_at,
             customer_access_token_hash,
             inspection.status AS inspection_status,
             inspection.last_error_code AS inspection_error_code
@@ -54,7 +54,7 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
     outputLanguage: job.output_language,
     payment: {
       status: job.payment_verified_at ? "verified" :
-        (job.status === "payment_failed" ? "failed" :
+        (job.payment_attempt_status === "failed" || job.status === "payment_failed" ? "failed" :
           (job.status === "refunded" ? "refunded" :
           (["awaiting_payment","uploaded","awaiting_upload"].includes(job.status) ? "pending" : "unknown"))),
       amountPaise: Number.isSafeInteger(Number(job.amount_paise)) ? Number(job.amount_paise) : null,
