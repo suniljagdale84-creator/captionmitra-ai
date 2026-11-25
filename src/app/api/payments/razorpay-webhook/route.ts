@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { readLimitedBody } from "@/lib/read-limited-body.mjs";
+import { razorpayAmountMatches } from "@/lib/razorpay-amount.mjs";
 
 export const runtime = "nodejs";
 
@@ -233,7 +234,7 @@ export async function POST(request: Request) {
       [payment.order_id]
     );
     const job = result.rows[0];
-    if (!job || Number(job.amount_paise) !== payment.amount || job.currency !== "INR" || !["awaiting_payment", "paid", "queued", "processing", "completed"].includes(job.status)) {
+    if (!job || !razorpayAmountMatches(job.amount_paise, payment.amount) || job.currency !== "INR" || !["awaiting_payment", "paid", "queued", "processing", "completed"].includes(job.status)) {
       await client.query("UPDATE payment_webhook_events SET processing_error_code = 'order_or_amount_mismatch', processed_at = NOW() WHERE provider = 'razorpay' AND provider_event_id = $1", [eventId]);
       await client.query("COMMIT");
       return NextResponse.json({ received: true, reviewed: true });
