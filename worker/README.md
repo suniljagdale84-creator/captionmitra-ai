@@ -10,6 +10,8 @@ Separate Node.js 20+ service intended for the future Ubuntu VPS. This code is no
 - Retry backoff and bounded retry count from the database schema.
 - Loopback-only HTTP health/status API with bearer-secret authentication for internal status.
 - Safe FFprobe metadata inspection and FFmpeg audio extraction helpers.
+- Audio extraction to mono 16 kHz / 64 kbps MP3 and eight-minute segment splitting, with each chunk checked against a 20 MB ceiling.
+- A media preparation wrapper that validates stored job metadata, downloads private Blob media, probes actual duration, extracts and splits audio, and removes its temporary job directory in a `finally` block.
 - Strict configuration checks and unit tests.
 
 ## Environment (never commit real values)
@@ -35,7 +37,7 @@ npm run check
 - No queue polling loop or automatic job execution.
 - Private Vercel Blob downloader using the SDK `get(pathname, { access: 'private', token })`, with pathname validation, streaming byte limits, and restrictive local file permissions.
 - Queue polling loop primitive with one/two worker slots and retry handling is drafted, but intentionally not enabled by the HTTP server until a real processor is implemented.
-- No audio chunking, OpenAI calls, translation, or SRT/TXT generation.
+- Audio chunking and temporary media preparation are implemented as tested helpers, but are not yet connected to the live queue consumer. OpenAI calls, translation, and SRT/TXT generation remain unimplemented.
 - No payment verification or payment-triggered enqueue endpoint.
 - No lease-expiry recovery scheduler or Blob/local-file cleanup scheduler.
 - No live PostgreSQL integration tests or deployment.
