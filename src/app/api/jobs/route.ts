@@ -1,0 +1,139 @@
+import { createHash } from "node:crypto";
+import { head } from "@vercel/blob";
+import { NextResponse } from "next/server";
+import { Pool } from "pg";
+
+export const runtime = "nodejs";
+
+const MAX_FILE_SIZE = 200 * 1024 * 1024;
+const ALLOWED_LANGUAGES = new Set(["Hindi", "Marathi", "English", "Hinglish"]);
+const ALLOWED_CONTENT_TYPES = new Set([
+  "video/mp4", "video/quicktime", "video/webm", "video/x-msvideo", "video/x-matroska",
+  "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac",
+  "audio/ogg", "audio/flac", "audio/webm"
+]);
+
+type JobRequest = {
+  pathname?: unknown;
+  language?: unknown;
+  idempotencyKey?: unknown;
+  customerAccessToken?: unknown;
+};
+
+declare global {
+  // Reuse a small connection pool across warm Next.js serverless invocations.
+  // eslint-disable-next-line no-var
+  var captionMitraPool: Pool | undefined;
+}
+
+function getPool() {
+  if (!process.env.DATABASE_URL) throw new Error("Database is not configured.");
+  if (!globalThis.captionMitraPool) {
+    globalThis.captionMitraPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 2,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 5_000,
+      statement_timeout: 8_000,
+      application_name: "captionmitra-web"
+    });
+  }
+  return globalThis.captionMitraPool;
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isAccessToken(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+export async function POST(request: Request) {
+  let client;
+  try {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return NextResponse.json({ error: "Private file storage is not configured." }, { status: 503 });
+    }
+
+    const body = (await request.json()) as JobRequest;
+    if (
+      typeof body.pathname !== "string" ||
+      !/^incoming\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,139}$/.test(body.pathname) ||
+      typeof body.language !== "string" ||
+      !ALLOWED_LANGUAGES.has(body.language) ||
+      !isUuid(body.idempotencyKey) ||
+      !isAccessToken(body.customerAccessToken)
+    ) {
+      return NextResponse.json({ error: "Invalid job request." }, { status: 400 });
+    }
+
+    // Verify the uploaded object against private Blob metadata; never trust browser file size/type.
+    const metadata = await head(body.pathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    if (
+      metadata.pathname !== body.pathname ||
+      !Number.isSafeInteger(metadata.size) ||
+      metadata.size < 1 ||
+      metadata.size > MAX_FILE_SIZE ||
+      !ALLOWED_CONTENT_TYPES.has(metadata.contentType)
+    ) {
+      return NextResponse.json({ error: "Uploaded file is not supported or exceeds 200 MB." }, { status: 400 });
+    }
+
+    const tokenHash = createHash("sha256").update(body.customerAccessToken, "utf8").digest("hex");
+    const pool = getPool();
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    const inserted = await client.query(
+      `INSERT INTO caption_jobs
+         (idempotency_key, source_blob_path, source_size_bytes, source_content_type,
+          output_language, status, customer_access_token_hash, customer_access_token_created_at)
+       VALUES ($1, $2, $3, $4, $5, 'awaiting_payment', $6, NOW())
+       ON CONFLICT (idempotency_key) DO NOTHING
+       RETURNING id, status`,
+      [body.idempotencyKey, metadata.pathname, metadata.size, metadata.contentType, body.language, tokenHash]
+    );
+
+    let job = inserted.rows[0];
+    if (!job) {
+      const existing = await client.query(
+        "SELECT id, status, source_blob_path, output_language, customer_access_token_hash FROM caption_jobs WHERE idempotency_key = $1 FOR UPDATE",
+        [body.idempotencyKey]
+      );
+      const row = existing.rows[0];
+      if (
+        !row ||
+        row.source_blob_path !== metadata.pathname ||
+        row.output_language !== body.language ||
+        row.customer_access_token_hash !== tokenHash
+      ) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "This upload request key was already used for a different job." }, { status: 409 });
+      }
+      job = row;
+    } else {
+      await client.query(
+        "INSERT INTO caption_job_events (job_id, from_status, to_status, event_code) VALUES ($1, NULL, 'awaiting_payment', 'upload_verified_job_created')",
+        [job.id]
+      );
+    }
+
+    await client.query("COMMIT");
+    return NextResponse.json(
+      { jobId: job.id, status: job.status, message: "Upload verified and job created. Payment is not enabled yet." },
+      { status: inserted.rows[0] ? 201 : 200, headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (error) {
+    if (client) await client.query("ROLLBACK").catch(() => {});
+    const message = error instanceof Error ? error.message : "";
+    const status = message.includes("not found") || message.includes("Blob") ? 400 : 500;
+    return NextResponse.json(
+      { error: status === 400 ? "Uploaded file could not be verified." : "Could not create the processing job." },
+      { status, headers: { "Cache-Control": "no-store" } }
+    );
+  } finally {
+    client?.release();
+  }
+}
