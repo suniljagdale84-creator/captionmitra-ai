@@ -1,0 +1,104 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { NextResponse } from "next/server";
+import { Pool } from "pg";
+
+export const runtime = "nodejs";
+
+declare global { var captionMitraPaymentPool: Pool | undefined; }
+
+function pool() {
+  if (!process.env.DATABASE_URL) throw new Error("Database is not configured");
+  if (!globalThis.captionMitraPaymentPool) globalThis.captionMitraPaymentPool = new Pool({
+    connectionString: process.env.DATABASE_URL, max: 2, idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 5000, statement_timeout: 8000, application_name: "captionmitra-payment"
+  });
+  return globalThis.captionMitraPaymentPool;
+}
+
+function validToken(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+function safeEqualHex(a: string, b: string) {
+  const left = Buffer.from(a, "hex"), right = Buffer.from(b, "hex");
+  return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
+}
+
+export async function POST(request: Request) {
+  let client;
+  try {
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) return NextResponse.json({ error: "Payment setup is not enabled yet." }, { status: 503 });
+
+    const body = await request.json() as { jobId?: unknown; customerAccessToken?: unknown };
+    if (typeof body.jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.jobId) || !validToken(body.customerAccessToken)) {
+      return NextResponse.json({ error: "Invalid payment request." }, { status: 400 });
+    }
+
+    const tokenHash = createHash("sha256").update(body.customerAccessToken).digest("hex");
+    client = await pool().connect();
+    const found = await client.query(
+      "SELECT id, status, media_duration_seconds, amount_paise, currency, provider_order_id, customer_access_token_hash FROM caption_jobs WHERE id = $1 LIMIT 1",
+      [body.jobId]
+    );
+    const job = found.rows[0];
+    if (!job || !job.customer_access_token_hash || !safeEqualHex(tokenHash, job.customer_access_token_hash)) {
+      return NextResponse.json({ error: "Job or customer access credential is invalid." }, { status: 404 });
+    }
+    if (job.status !== "awaiting_payment") return NextResponse.json({ error: "This job is not awaiting payment." }, { status: 409 });
+    if (!job.media_duration_seconds || Number(job.media_duration_seconds) <= 0) {
+      return NextResponse.json({ error: "Video duration must be measured by the processing worker before payment." }, { status: 409 });
+    }
+
+    const billableMinutes = Math.ceil(Number(job.media_duration_seconds) / 60);
+    const amountPaise = Math.max(1000, billableMinutes * 300);
+    if (!Number.isSafeInteger(amountPaise)) return NextResponse.json({ error: "Calculated amount is invalid." }, { status: 400 });
+
+    let orderId = job.provider_order_id as string | null;
+    if (orderId) {
+      const existing = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}`, {
+        headers: { Authorization: "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64") },
+        cache: "no-store"
+      });
+      if (!existing.ok) throw new Error("Could not verify existing payment order");
+      const order = await existing.json() as { id: string; amount: number; currency: string; status: string };
+      if (order.amount !== amountPaise || order.currency !== "INR") throw new Error("Existing payment order amount does not match job price");
+      return NextResponse.json({ orderId: order.id, amountPaise, currency: "INR", keyId }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    const response = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64"),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        amount: amountPaise, currency: "INR",
+        receipt: `cm_${String(job.id).replaceAll("-", "").slice(0, 32)}`,
+        notes: { captionmitra_job_id: job.id }
+      }),
+      cache: "no-store"
+    });
+    const data = await response.json() as { id?: string; amount?: number; currency?: string };
+    if (!response.ok || !data.id || data.amount !== amountPaise || data.currency !== "INR") {
+      throw new Error("Payment provider could not create a matching order");
+    }
+
+    const updated = await client.query(
+      "UPDATE caption_jobs SET amount_paise = $2, currency = 'INR', payment_provider = 'razorpay', provider_order_id = $3, updated_at = NOW() WHERE id = $1 AND status = 'awaiting_payment' AND provider_order_id IS NULL RETURNING id",
+      [job.id, amountPaise, data.id]
+    );
+    if (!updated.rowCount) {
+      // A concurrent request may have created an order. Do not expose the losing order.
+      await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(data.id)}`, {
+        method: "GET", headers: { Authorization: "Basic " + Buffer.from(`${keyId}:${keySecret}`).toString("base64") }, cache: "no-store"
+      });
+      return NextResponse.json({ error: "A payment order is already being prepared. Please retry shortly." }, { status: 409 });
+    }
+    return NextResponse.json({ orderId: data.id, amountPaise, currency: "INR", keyId }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "Could not prepare payment. Please try again." }, { status: 502, headers: { "Cache-Control": "no-store" } });
+  } finally {
+    client?.release();
+  }
+}
