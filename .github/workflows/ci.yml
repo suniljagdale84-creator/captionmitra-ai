@@ -32,14 +32,19 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Validate PostgreSQL migration
+      - name: Validate all PostgreSQL migrations
         env:
           PGPASSWORD: ci-only-password
-        run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_schema.sql
+        run: |
+          set -euo pipefail
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
       - name: Install worker dependencies
         working-directory: worker
         run: npm install --no-audit --no-fund
-      - name: Test worker queue and configuration
+      - name: Test worker modules
         working-directory: worker
         run: npm test && npm run check
       - name: Build Next.js application
