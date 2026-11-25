@@ -35,6 +35,8 @@ Status: design proposal for pre-VPS implementation. This document does not deplo
 - Safe FFmpeg/ffprobe helper functions use child-process argument arrays without shell interpolation, with command timeouts and bounded output.
 - Worker configuration tests are included.
 - PostgreSQL pool, transactional queue claim (`FOR UPDATE SKIP LOCKED`), worker-owned lease checks, atomic retry updates, retry backoff, and a loopback-only health/status API have now been added.
+- Private Vercel Blob download helper now uses the SDK `get(pathname, { access: 'private', token })`, validates pathnames, streams to a restricted local file, and enforces a byte limit while streaming.
+- A bounded queue-polling loop primitive is drafted for one or two worker slots. It is deliberately not enabled by the HTTP server until the media processor and cleanup path are ready.
 - The internal status route requires a bearer secret; the health route reports database connectivity without exposing secrets.
 - This remains a foundation: no queue polling loop, Blob download, payment-gated job creation, AI transcription/translation, lease-expiry recovery, or cleanup scheduler is implemented. Do not deploy it or send customer jobs to it yet.
 - CI installs the worker's PostgreSQL dependency and runs worker tests/syntax checks alongside PostgreSQL migration validation and the web build.
