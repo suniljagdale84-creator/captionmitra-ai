@@ -42,11 +42,13 @@ export async function POST(request: Request) {
   try {
     if (!process.env.BLOB_READ_WRITE_TOKEN) return NextResponse.json({ error: "Private file storage is not configured." }, { status: 503 });
     const body = (await request.json()) as JobRequest;
-    if (typeof body.pathname !== "string" || !/^incoming\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,139}$/.test(body.pathname) || typeof body.language !== "string" || !ALLOWED_LANGUAGES.has(body.language) || !isUuid(body.idempotencyKey)) {
+    if (typeof body.pathname !== "string" || !/^incoming\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,139}$/.test(body.pathname) || typeof body.language !== "string" || !ALLOWED_LANGUAGES.has(body.language) || !isUuid(body.idempotencyKey) || typeof body.turnstileToken !== "string" || body.turnstileToken.length < 10) {
       return NextResponse.json({ error: "Invalid job request." }, { status: 400 });
     }
 
-    if (!(await verifyTurnstile(body.turnstileToken, request))) return NextResponse.json({ error: "Security verification failed. Please try again." }, { status: 403 });\n\n    // Verify actual private Blob metadata; browser-provided size and MIME are not trusted.
+    if (!(await verifyTurnstile(body.turnstileToken, request))) return NextResponse.json({ error: "Security verification failed. Please try again." }, { status: 403 });
+
+    // Verify actual private Blob metadata; browser-provided size and MIME are not trusted.
     const metadata = await head(body.pathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
     if (metadata.pathname !== body.pathname || !Number.isSafeInteger(metadata.size) || metadata.size < 1 || metadata.size > MAX_FILE_SIZE || !ALLOWED_CONTENT_TYPES.has(metadata.contentType)) {
       return NextResponse.json({ error: "Uploaded file is not supported or exceeds 200 MB." }, { status: 400 });
