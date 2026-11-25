@@ -1,8 +1,11 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { del } from "@vercel/blob";
 import { loadWorkerConfig } from "./config.mjs";
 import { createDatabase } from "./db.mjs";
 import { downloadCustomerResult } from "./customer-download.mjs";
+import { runBlobCleanup } from "./cleanup.mjs";
+import { startCleanupScheduler, getCleanupStats } from "./cleanup-scheduler.mjs";
 
 const config = loadWorkerConfig();
 const pool = createDatabase(config.databaseUrl);
@@ -25,13 +28,28 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+const cleanupScheduler = startCleanupScheduler({
+  intervalMs: 15 * 60 * 1000,
+  cleanup: () => runBlobCleanup(pool, (pathname) =>
+    del(pathname, { access: "private", token: config.blobReadWriteToken })
+  ),
+  onResult: (result) => {
+    // Keep operational logs free of customer filenames, paths and credentials.
+    process.stdout.write(JSON.stringify({
+      event: "blob_cleanup",
+      ok: result.ok,
+      ...(result.ok ? result.result : { errorCode: result.errorCode })
+    }) + "\\n");
+  }
+});
+
 const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     try {
       await pool.query("SELECT 1");
-      send(response, 200, { ok: true, service: "captionmitra-worker", database: "connected", processingEnabled: false });
+      send(response, 200, { ok: true, service: "captionmitra-worker", database: "connected", cleanupScheduler: "running", processingEnabled: false });
     } catch {
-      send(response, 503, { ok: false, service: "captionmitra-worker", database: "unavailable" });
+      send(response, 503, { ok: false, service: "captionmitra-worker", database: "unavailable", cleanupScheduler: "running" });
     }
     return;
   }
@@ -43,16 +61,32 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && request.url === "/internal/worker/status") {
     try {
-      const result = await pool.query("SELECT COUNT(*)::int AS queued_jobs FROM caption_jobs WHERE status = 'queued'");
-      send(response, 200, { ok: true, service: "captionmitra-worker", queuedJobs: result.rows[0].queued_jobs, processingEnabled: false });
+      const [jobs, cleanup] = await Promise.all([
+        pool.query("SELECT COUNT(*) FILTER (WHERE status = 'queued')::int AS queued_jobs, COUNT(*) FILTER (WHERE status = 'processing')::int AS processing_jobs FROM caption_jobs"),
+        getCleanupStats(pool)
+      ]);
+      send(response, 200, {
+        ok: true,
+        service: "captionmitra-worker",
+        queuedJobs: jobs.rows[0].queued_jobs,
+        processingJobs: jobs.rows[0].processing_jobs,
+        cleanupScheduler: "running",
+        cleanup
+      });
     } catch {
       send(response, 503, { error: "database_unavailable" });
     }
     return;
   }
 
+  if (request.method === "POST" && request.url === "/internal/worker/cleanup/run") {
+    const result = await cleanupScheduler.run();
+    send(response, 200, result);
+    return;
+  }
+
   const url = new URL(request.url || "/", "http://127.0.0.1");
-  const downloadMatch = url.pathname.match(/^\/internal\/customer\/jobs\/([0-9a-f-]{36})\/download$/i);
+  const downloadMatch = url.pathname.match(/^\\/internal\\/customer\\/jobs\\/([0-9a-f-]{36})\\/download$/i);
   if (request.method === "GET" && downloadMatch) {
     const accessToken = request.headers["x-customer-access-token"];
     const format = url.searchParams.get("format");
@@ -87,9 +121,13 @@ server.listen(config.port || 8080, "127.0.0.1", () => {
   process.stdout.write("CaptionMitra worker API started on loopback.\\n");
 });
 
+let shuttingDown = false;
 async function shutdown() {
-  server.close();
+  if (shuttingDown) return;
+  shuttingDown = true;
+  cleanupScheduler.stop();
+  await new Promise(resolve => server.close(resolve));
   await pool.end();
 }
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => { void shutdown(); });
+process.on("SIGINT", () => { void shutdown(); });
