@@ -6,9 +6,20 @@ import { createDatabase } from "./db.mjs";
 import { downloadCustomerResult } from "./customer-download.mjs";
 import { runBlobCleanup } from "./cleanup.mjs";
 import { startCleanupScheduler, getCleanupStats } from "./cleanup-scheduler.mjs";
+import { runWorkerLoop } from "./worker-loop.mjs";
+import { processCaptionJob } from "./process-caption-job.mjs";
 
 const config = loadWorkerConfig();
 const pool = createDatabase(config.databaseUrl);
+const workerAbort = new AbortController();
+const workerLoop = runWorkerLoop({
+  pool,
+  concurrency: config.concurrency,
+  processJob: (job, workerId) => processCaptionJob(job, workerId, config, { pool }),
+  signal: workerAbort.signal
+}).catch(() => {
+  process.stderr.write("CaptionMitra worker loop stopped unexpectedly.\\n");
+});
 
 function isAuthorized(request) {
   const value = request.headers.authorization || "";
@@ -47,7 +58,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     try {
       await pool.query("SELECT 1");
-      send(response, 200, { ok: true, service: "captionmitra-worker", database: "connected", cleanupScheduler: "running", processingEnabled: false });
+      send(response, 200, { ok: true, service: "captionmitra-worker", database: "connected", cleanupScheduler: "running", processingEnabled: true });
     } catch {
       send(response, 503, { ok: false, service: "captionmitra-worker", database: "unavailable", cleanupScheduler: "running" });
     }
@@ -126,7 +137,9 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   cleanupScheduler.stop();
+  workerAbort.abort();
   await new Promise(resolve => server.close(resolve));
+  await workerLoop;
   await pool.end();
 }
 process.on("SIGTERM", () => { void shutdown(); });
