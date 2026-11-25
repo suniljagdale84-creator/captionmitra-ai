@@ -1,0 +1,26 @@
+name: CaptionMitra CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [captionmitra-pre-vps-setup]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Next.js application
+        run: npm run build
+        env:
+          OPENAI_API_KEY: ci-placeholder-not-a-real-key
+          SITE_KEY: 1x00000000000000000000AA
+          TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
