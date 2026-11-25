@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
+import { readLimitedBody } from "@/lib/read-limited-body.mjs";
 
 export const runtime = "nodejs";
 
@@ -24,8 +25,19 @@ export async function POST(request: Request) {
   if (!secret) return NextResponse.json({ error: "Webhook is not configured." }, { status: 503 });
   const signature = request.headers.get("x-razorpay-signature") || "";
   const eventId = request.headers.get("x-razorpay-event-id") || "";
-  const raw = await request.text();
-  if (Buffer.byteLength(raw, "utf8") > 1024 * 1024) return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+  let raw: string;
+  try {
+    const contentLength = Number(request.headers.get("content-length") || "0");
+    if (Number.isFinite(contentLength) && contentLength > 1024 * 1024) {
+      return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+    }
+    raw = await readLimitedBody(request.body, 1024 * 1024);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return NextResponse.json({ error: "Payload too large." }, { status: 413 });
+    }
+    return NextResponse.json({ error: "Invalid webhook body." }, { status: 400 });
+  }
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(eventId) || !validSignature(raw, signature, secret)) {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 400 });
   }
