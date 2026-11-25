@@ -58,8 +58,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Video duration must be measured by the processing worker before payment." }, { status: 409 });
     }
 
-    const billableMinutes = Math.ceil(Number(job.media_duration_seconds) / 60);
-    const amountPaise = Math.max(1000, billableMinutes * 300);
+    const roundingMode = process.env.BILLING_ROUNDING_MODE;
+    if (roundingMode !== "ceil_minute" && roundingMode !== "pro_rata") {
+      await client.query("ROLLBACK"); transaction = false;
+      return NextResponse.json({ error: "Payment is paused until the partial-minute billing rule is confirmed." }, { status: 503 });
+    }
+    const durationSeconds = Number(job.media_duration_seconds);
+    const amountPaise = roundingMode === "ceil_minute"
+      ? Math.max(1000, Math.ceil(durationSeconds / 60) * 300)
+      : Math.max(1000, Math.ceil(durationSeconds * 5));
     if (!Number.isSafeInteger(amountPaise)) {
       await client.query("ROLLBACK"); transaction = false;
       return NextResponse.json({ error: "Calculated amount is invalid." }, { status: 400 });
