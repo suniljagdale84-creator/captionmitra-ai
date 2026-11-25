@@ -79,6 +79,10 @@ export async function POST(request: Request) {
       if (!existing.ok) throw new Error("Could not verify existing payment order");
       const order = await existing.json() as { id: string; amount: number; currency: string };
       if (order.amount !== amountPaise || order.currency !== "INR") throw new Error("Existing payment order amount does not match job price");
+      await client.query(
+        "UPDATE caption_jobs SET payment_attempt_status = 'pending', error_code = NULL, updated_at = NOW() WHERE id = $1",
+        [job.id]
+      );
       await client.query("COMMIT"); transaction = false;
       return NextResponse.json({ orderId: order.id, amountPaise, currency: "INR", keyId }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -99,7 +103,7 @@ export async function POST(request: Request) {
     }
 
     await client.query(
-      "UPDATE caption_jobs SET amount_paise = $2, currency = 'INR', payment_provider = 'razorpay', provider_order_id = $3, updated_at = NOW() WHERE id = $1",
+      "UPDATE caption_jobs SET amount_paise = $2, currency = 'INR', payment_provider = 'razorpay', provider_order_id = $3, payment_attempt_status = 'pending', error_code = NULL, updated_at = NOW() WHERE id = $1",
       [job.id, amountPaise, data.id]
     );
     await client.query("COMMIT"); transaction = false;
