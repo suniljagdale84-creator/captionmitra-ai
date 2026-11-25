@@ -37,7 +37,7 @@ npm run check
 - No queue polling loop or automatic job execution.
 - Private Vercel Blob downloader using the SDK `get(pathname, { access: 'private', token })`, with pathname validation, streaming byte limits, and restrictive local file permissions.
 - Queue polling loop primitive with one/two worker slots and retry handling is drafted, but intentionally not enabled by the HTTP server until a real processor is implemented.
-- Audio chunking and temporary media preparation are implemented as tested helpers, but are not yet connected to the live queue consumer. OpenAI calls, translation, and SRT/TXT generation remain unimplemented.
+- Timestamped OpenAI Whisper transcription is implemented with bounded retries and sequential chunk processing. SRT and plain-text transcript content are generated, with chunk-relative timestamps offset into the full-video timeline. The preparation wrapper removes all temporary media files after the content is returned. These helpers are not yet connected to the live queue consumer or private result upload. Translation remains unimplemented.
 - No payment verification or payment-triggered enqueue endpoint.
 - No lease-expiry recovery scheduler or Blob/local-file cleanup scheduler.
 - No live PostgreSQL integration tests or deployment.
