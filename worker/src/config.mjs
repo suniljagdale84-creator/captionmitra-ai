@@ -11,6 +11,11 @@ export function loadWorkerConfig(env = process.env) {
     throw new Error("WORKER_SHARED_SECRET must be at least 32 bytes");
   }
 
+  const port = Number(env.WORKER_PORT ?? "8080");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("WORKER_PORT must be a valid TCP port");
+  }
+
   const concurrency = Number(env.WORKER_CONCURRENCY ?? "1");
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2) {
     throw new Error("WORKER_CONCURRENCY must be an integer between 1 and 2");
@@ -22,6 +27,7 @@ export function loadWorkerConfig(env = process.env) {
     openAiApiKey: env.OPENAI_API_KEY,
     sharedSecret: secret,
     concurrency,
+    port,
     tempDir: env.WORKER_TEMP_DIR || "/var/tmp/captionmitra",
     maxInputBytes: 200 * 1024 * 1024,
     maxJobDurationSeconds: 3 * 60 * 60
