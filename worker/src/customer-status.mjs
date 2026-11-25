@@ -18,7 +18,7 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
   catch { throw new Error("Invalid customer access token"); }
 
   const result = await pool.query(
-    `SELECT status, amount_paise, currency, output_language,
+    `SELECT caption_jobs.status, amount_paise, currency, output_language,
             progress_stage, progress_percent, progress_updated_at,
             payment_verified_at, result_blob_path, expires_at,
             customer_access_token_hash,
