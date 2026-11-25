@@ -21,6 +21,17 @@ const languages = [
 
 declare global {
   interface Window {
+    Razorpay?: new (options: {
+      key: string;
+      amount: number;
+      currency: string;
+      name: string;
+      description: string;
+      order_id: string;
+      handler: (response: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => void;
+      modal?: { ondismiss?: () => void };
+      theme?: { color?: string };
+    }) => { open: () => void };
     turnstile?: {
       render: (container: HTMLElement, options: {
         sitekey: string;
@@ -47,6 +58,8 @@ export default function Home() {
   const [customerStatus, setCustomerStatus] = useState<any>(null);
   const [statusError, setStatusError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState("");
   const [error, setError] = useState("");
   const [uploaded, setUploaded] = useState(false);
   const [uploadedPath, setUploadedPath] = useState("");
@@ -87,6 +100,46 @@ export default function Home() {
   }, [jobInfo]);
 
   const estimatedPaise = durationSeconds == null ? null : Math.max(1000, Math.ceil(durationSeconds * 5));
+
+  async function startPayment() {
+    if (!jobInfo || customerStatus?.inspection?.status !== "completed" || customerStatus?.payment?.status === "verified") return;
+    if (!window.Razorpay) { setPaymentMessage("Secure checkout is loading. Please try again in a moment."); return; }
+    setPaymentBusy(true);
+    setPaymentMessage("");
+    try {
+      const response = await fetch("/api/payments/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ jobId: jobInfo.jobId, customerAccessToken: jobInfo.customerAccessToken })
+      });
+      const order = await response.json();
+      if (!response.ok) throw new Error(order.error || "Could not prepare payment.");
+      if (!order.orderId || !order.keyId || !Number.isSafeInteger(order.amountPaise) || order.amountPaise < 1000 || order.currency !== "INR") {
+        throw new Error("Payment order details could not be verified.");
+      }
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amountPaise,
+        currency: order.currency,
+        name: "CaptionMitra AI",
+        description: "Video captions · exact-duration pricing",
+        order_id: order.orderId,
+        handler: () => {
+          setPaymentMessage("Payment submitted. Waiting for secure confirmation from Razorpay…");
+        },
+        modal: {
+          ondismiss: () => setPaymentMessage("Checkout closed. Your job has not started; you can try payment again.")
+        },
+        theme: { color: "#2563eb" }
+      });
+      checkout.open();
+    } catch (err) {
+      setPaymentMessage(err instanceof Error ? err.message : "Could not start secure payment.");
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
 
   async function downloadCaption(format: "srt" | "txt") {
     if (!jobInfo) return;
@@ -267,6 +320,9 @@ export default function Home() {
           <div className="progressMeta"><strong>{customerStatus?.stage || "Waiting for status"}</strong><b>{customerStatus?.progressPercent ?? 0}%</b></div>
           <div className="progressTrack"><div style={{ width: `${customerStatus?.progressPercent ?? 0}%` }} /></div>
           <div className="dashboardFacts"><div><small>PAYMENT</small><strong>{customerStatus?.payment?.status || "Not enabled"}</strong></div><div><small>OUTPUT</small><strong>{customerStatus?.outputLanguage || language}</strong></div><div><small>PRICE</small><strong>{customerStatus?.payment?.amountPaise != null ? `₹${(customerStatus.payment.amountPaise / 100).toFixed(2)}` : estimatedPaise == null ? "Pending" : `Estimate ₹${(estimatedPaise / 100).toFixed(2)}`}</strong></div></div>
+          {customerStatus?.inspection?.status === "completed" && customerStatus?.payment?.status !== "verified" && customerStatus?.status === "awaiting_payment" && <button className="generate" onClick={startPayment} disabled={paymentBusy || busy}><span>{paymentBusy ? <Loader2 className="spin" size={18}/> : <ShieldCheck size={18}/>}</span>{paymentBusy ? "Preparing secure checkout…" : `Pay ₹${((customerStatus?.payment?.amountPaise || 0) / 100).toFixed(2)} securely`}</button>}
+          {customerStatus?.payment?.status === "verified" && <div className="success"><CheckCircle2 size={17}/> Payment verified. Your video will enter the processing queue.</div>}
+          {paymentMessage && <div className="success">{paymentMessage}</div>}
           {customerStatus?.downloads?.available && <div className="downloads"><button onClick={() => downloadCaption("srt")} disabled={downloading}>Download SRT</button><button onClick={() => downloadCaption("txt")} disabled={downloading}>Download TXT</button></div>}
           {statusError && <div className="error">{statusError}</div>}
           <details className="accessDetails"><summary>Show your private access key</summary><code>{jobInfo.customerAccessToken}</code><small>Keep this key private. Anyone with it may access this job's status and results.</small></details>
