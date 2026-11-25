@@ -9,10 +9,19 @@ import { startCleanupScheduler, getCleanupStats } from "./cleanup-scheduler.mjs"
 import { runWorkerLoop } from "./worker-loop.mjs";
 import { processCaptionJob } from "./process-caption-job.mjs";
 import { getCustomerJobStatus } from "./customer-status.mjs";
+import { runMediaInspectionLoop } from "./media-inspection.mjs";
 
 const config = loadWorkerConfig();
 const pool = createDatabase(config.databaseUrl);
 const workerAbort = new AbortController();
+const inspectionLoop = runMediaInspectionLoop({
+  pool,
+  config,
+  concurrency: 1,
+  signal: workerAbort.signal
+}).catch(() => {
+  process.stderr.write("CaptionMitra media inspection loop stopped unexpectedly.\\n");
+});
 const workerLoop = runWorkerLoop({
   pool,
   concurrency: config.concurrency,
@@ -157,7 +166,7 @@ async function shutdown() {
   cleanupScheduler.stop();
   workerAbort.abort();
   await new Promise(resolve => server.close(resolve));
-  await workerLoop;
+  await Promise.all([workerLoop, inspectionLoop]);
   await pool.end();
 }
 process.on("SIGTERM", () => { void shutdown(); });
