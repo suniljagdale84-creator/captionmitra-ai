@@ -21,8 +21,12 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
     `SELECT status, amount_paise, currency, output_language,
             progress_stage, progress_percent, progress_updated_at,
             payment_verified_at, result_blob_path, expires_at,
-            customer_access_token_hash
-     FROM caption_jobs WHERE id = $1 LIMIT 1`,
+            customer_access_token_hash,
+            inspection.status AS inspection_status,
+            inspection.last_error_code AS inspection_error_code
+     FROM caption_jobs
+     LEFT JOIN caption_media_inspections AS inspection ON inspection.job_id = caption_jobs.id
+     WHERE caption_jobs.id = $1 LIMIT 1`,
     [jobId]
   );
   const job = result.rows[0];
@@ -42,6 +46,10 @@ export async function getCustomerJobStatus({ pool, jobId, accessToken, now = Dat
     jobId,
     status: progress.status,
     stage: progress.stage,
+    inspection: {
+      status: job.inspection_status || "not_started",
+      error: job.inspection_status === "failed" ? "media_inspection_failed" : null
+    },
     progressPercent: progress.percent,
     outputLanguage: job.output_language,
     payment: {
