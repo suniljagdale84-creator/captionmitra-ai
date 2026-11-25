@@ -9,7 +9,7 @@ const MAX_FILE_SIZE = 200 * 1024 * 1024;
 const ALLOWED_LANGUAGES = new Set(["Hindi", "Marathi", "English", "Hinglish"]);
 const ALLOWED_CONTENT_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-msvideo", "video/x-matroska", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/mp4", "audio/aac", "audio/ogg", "audio/flac", "audio/webm"]);
 
-type JobRequest = { pathname?: unknown; language?: unknown; idempotencyKey?: unknown };
+type JobRequest = { pathname?: unknown; language?: unknown; idempotencyKey?: unknown; turnstileToken?: unknown };
 
 declare global { var captionMitraPool: Pool | undefined; }
 
@@ -23,6 +23,20 @@ function isUuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+async function verifyTurnstile(token: string, request: Request) {
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) return false;
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ secret, response: token, remoteip: ip })
+  });
+  if (!response.ok) return false;
+  const result = await response.json() as { success?: boolean };
+  return result.success === true;
+}
+
 export async function POST(request: Request) {
   let client;
   try {
@@ -32,7 +46,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid job request." }, { status: 400 });
     }
 
-    // Verify actual private Blob metadata; browser-provided size and MIME are not trusted.
+    if (!(await verifyTurnstile(body.turnstileToken, request))) return NextResponse.json({ error: "Security verification failed. Please try again." }, { status: 403 });\n\n    // Verify actual private Blob metadata; browser-provided size and MIME are not trusted.
     const metadata = await head(body.pathname, { token: process.env.BLOB_READ_WRITE_TOKEN });
     if (metadata.pathname !== body.pathname || !Number.isSafeInteger(metadata.size) || metadata.size < 1 || metadata.size > MAX_FILE_SIZE || !ALLOWED_CONTENT_TYPES.has(metadata.contentType)) {
       return NextResponse.json({ error: "Uploaded file is not supported or exceeds 200 MB." }, { status: 400 });
