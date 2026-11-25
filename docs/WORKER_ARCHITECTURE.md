@@ -30,6 +30,13 @@ Status: design proposal for pre-VPS implementation. This document does not deplo
 - Worker concurrency, maximum duration, temporary disk usage, retry count, and AI spend must be bounded.
 - Do not expose the VPS worker port publicly without an authenticated reverse proxy/firewall policy.
 
+## Worker foundation status
+- A standalone `worker/` Node.js 20 package now exists with strict environment validation, bounded concurrency (1–2), a 200 MB input ceiling, and a three-hour media-duration ceiling.
+- Safe FFmpeg/ffprobe helper functions use child-process argument arrays without shell interpolation, with command timeouts and bounded output.
+- Worker configuration tests are included.
+- This is only a foundation: no HTTP job intake, PostgreSQL adapter, queue polling, Blob download, AI transcription/translation, or cleanup scheduler is implemented. Do not deploy it or send customer jobs to it yet.
+- CI now runs the worker unit tests and syntax checks in addition to the PostgreSQL migration validation and web build.
+
 ## Database migration status
 - Initial PostgreSQL schema drafted in `database/migrations/001_initial_schema.sql`.
 - It includes job status constraints, unique idempotency/provider identifiers, queue/expiry indexes, webhook event deduplication, and operational status events.
