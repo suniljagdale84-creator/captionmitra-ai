@@ -25,10 +25,16 @@ Status: design proposal for pre-VPS implementation. This document does not deplo
 - Keep the customer-facing Next.js app on Vercel for now.
 - Run a separate Node.js worker/API and FFmpeg on the eventual Ubuntu VPS.
 - Use a durable database-backed job queue; do not rely on in-memory arrays or a single long HTTP request.
-- PostgreSQL is the preferred queue/job-state store for reliability and future concurrency. The final hosting arrangement and connection security still need testing.
+- PostgreSQL is the preferred queue/job-state store for reliability and future concurrency. An initial schema is in `database/migrations/001_initial_schema.sql`; it defines jobs, payment webhook deduplication, and append-only job events. It is a starting migration, not a connected or deployed database.
 - Worker API must require a high-entropy shared secret or signed short-lived service tokens, use TLS, validate every job field, and rate-limit requests.
 - Worker concurrency, maximum duration, temporary disk usage, retry count, and AI spend must be bounded.
 - Do not expose the VPS worker port publicly without an authenticated reverse proxy/firewall policy.
+
+## Database migration status
+- Initial PostgreSQL schema drafted in `database/migrations/001_initial_schema.sql`.
+- It includes job status constraints, unique idempotency/provider identifiers, queue/expiry indexes, webhook event deduplication, and operational status events.
+- The migration has not been applied to a live database. It still needs execution against a disposable PostgreSQL instance and schema tests before production.
+- No database credentials or paid database service have been created.
 
 ## Required job states
 `awaiting_upload` → `uploaded` → `awaiting_payment` → `paid` → `queued` → `processing` → `completed`
