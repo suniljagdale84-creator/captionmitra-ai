@@ -36,6 +36,9 @@ Status: design proposal for pre-VPS implementation. This document does not deplo
 - Worker configuration tests are included.
 - PostgreSQL pool, transactional queue claim (`FOR UPDATE SKIP LOCKED`), worker-owned lease checks, atomic retry updates, retry backoff, and a loopback-only health/status API have now been added.
 - Private Vercel Blob download helper now uses the SDK `get(pathname, { access: 'private', token })`, validates pathnames, streams to a restricted local file, and enforces a byte limit while streaming.
+- FFmpeg media helpers now extract mono 16 kHz / 64 kbps MP3 audio and split it into eight-minute chunks, checking every chunk against a 20 MB ceiling.
+- A preparation wrapper validates the stored job metadata against the actual private Blob size/content type and ffprobe duration, then removes the per-job temporary directory in `finally`.
+- The preparation wrapper is not yet wired to the polling loop; transcription, translation, output upload, and payment-gated enqueue are still pending.
 - A bounded queue-polling loop primitive is drafted for one or two worker slots. It is deliberately not enabled by the HTTP server until the media processor and cleanup path are ready.
 - The internal status route requires a bearer secret; the health route reports database connectivity without exposing secrets.
 - This remains a foundation: no queue polling loop, Blob download, payment-gated job creation, AI transcription/translation, lease-expiry recovery, or cleanup scheduler is implemented. Do not deploy it or send customer jobs to it yet.
