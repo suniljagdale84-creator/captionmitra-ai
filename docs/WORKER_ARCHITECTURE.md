@@ -34,8 +34,10 @@ Status: design proposal for pre-VPS implementation. This document does not deplo
 - A standalone `worker/` Node.js 20 package now exists with strict environment validation, bounded concurrency (1–2), a 200 MB input ceiling, and a three-hour media-duration ceiling.
 - Safe FFmpeg/ffprobe helper functions use child-process argument arrays without shell interpolation, with command timeouts and bounded output.
 - Worker configuration tests are included.
-- This is only a foundation: no HTTP job intake, PostgreSQL adapter, queue polling, Blob download, AI transcription/translation, or cleanup scheduler is implemented. Do not deploy it or send customer jobs to it yet.
-- CI now runs the worker unit tests and syntax checks in addition to the PostgreSQL migration validation and web build.
+- PostgreSQL pool, transactional queue claim (`FOR UPDATE SKIP LOCKED`), worker-owned lease checks, atomic retry updates, retry backoff, and a loopback-only health/status API have now been added.
+- The internal status route requires a bearer secret; the health route reports database connectivity without exposing secrets.
+- This remains a foundation: no queue polling loop, Blob download, payment-gated job creation, AI transcription/translation, lease-expiry recovery, or cleanup scheduler is implemented. Do not deploy it or send customer jobs to it yet.
+- CI installs the worker's PostgreSQL dependency and runs worker tests/syntax checks alongside PostgreSQL migration validation and the web build.
 
 ## Database migration status
 - Initial PostgreSQL schema drafted in `database/migrations/001_initial_schema.sql`.
