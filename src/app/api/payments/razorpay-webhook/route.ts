@@ -34,11 +34,12 @@ export async function POST(request: Request) {
   try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: "Invalid webhook payload." }, { status: 400 }); }
   if (payload?.event === "refund.processed" || payload?.event === "refund.failed") {
     const refund = payload?.payload?.refund?.entity;
+    const expectedRefundStatus = payload.event === "refund.processed" ? "processed" : "failed";
     if (!refund || typeof refund.id !== "string" ||
         typeof refund.payment_id !== "string" ||
         !Number.isSafeInteger(refund.amount) || refund.amount <= 0 ||
         refund.currency !== "INR" ||
-        !["processed", "failed"].includes(refund.status)) {
+        refund.status !== expectedRefundStatus) {
       return NextResponse.json({ error: "Invalid refund details." }, { status: 400 });
     }
     const digest = createHash("sha256").update(raw).digest("hex");
@@ -77,13 +78,17 @@ export async function POST(request: Request) {
       }
 
       const refundRecord = await client.query(
-        "SELECT amount_paise, currency, status FROM caption_payment_refunds WHERE provider = 'razorpay' AND provider_refund_id = $1 FOR UPDATE",
+        "SELECT amount_paise, currency, status, provider_payment_id FROM caption_payment_refunds WHERE provider = 'razorpay' AND provider_refund_id = $1 FOR UPDATE",
         [refund.id]
       );
       const priorRefund = refundRecord.rows[0];
-      if (priorRefund && (Number(priorRefund.amount_paise) !== refund.amount || priorRefund.currency !== "INR")) {
+      if (priorRefund && (
+        Number(priorRefund.amount_paise) !== refund.amount ||
+        priorRefund.currency !== "INR" ||
+        priorRefund.provider_payment_id !== refund.payment_id
+      )) {
         await client.query("ROLLBACK");
-        return NextResponse.json({ error: "Refund identifier was reused with different details." }, { status: 409 });
+        return NextResponse.json({ error: "Refund identifier was reused with different payment details." }, { status: 409 });
       }
       if (priorRefund?.status === "processed" && refund.status !== "processed") {
         await client.query("COMMIT");
