@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { head } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Uploaded file is not supported or exceeds 200 MB." }, { status: 400 });
     }
 
-    const tokenHash = createHash("sha256").update(body.customerAccessToken, "utf8").digest("hex");
+    const customerAccessToken = randomBytes(32).toString("base64url");\n    const tokenHash = createHash("sha256").update(customerAccessToken, "utf8").digest("hex");
     const pool = getPool();
     client = await pool.connect();
     await client.query("BEGIN");
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
         await client.query("ROLLBACK");
         return NextResponse.json({ error: "This upload request key was already used for a different job." }, { status: 409 });
       }
-      job = row;
+      const rotated = await client.query(\n        "UPDATE caption_jobs SET customer_access_token_hash = $2, customer_access_token_created_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING id, status",\n        [row.id, tokenHash]\n      );\n      job = rotated.rows[0];
     } else {
       await client.query(
         "INSERT INTO caption_job_events (job_id, from_status, to_status, event_code) VALUES ($1, NULL, 'awaiting_payment', 'upload_verified_job_created')",
@@ -122,7 +122,7 @@ export async function POST(request: Request) {
 
     await client.query("COMMIT");
     return NextResponse.json(
-      { jobId: job.id, status: job.status, message: "Upload verified and job created. Payment is not enabled yet." },
+      { jobId: job.id, status: job.status, customerAccessToken, message: "Upload verified and job created. Payment is not enabled yet." },
       { status: inserted.rows[0] ? 201 : 200, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
