@@ -11,10 +11,9 @@ This branch contains a server-side payment foundation only. It is not enabled fo
 - Requires the per-job customer access credential.
 - Requires a worker-measured positive media duration; browser duration and client price are never accepted.
 - Locks the job row while preparing/reusing its Razorpay order to avoid concurrent duplicate orders.
-- Uses the fixed business price of INR 3/minute and minimum INR 10.
-- IMPORTANT: partial-minute billing has not been approved yet. BILLING_ROUNDING_MODE must explicitly be set to either ceil_minute or pro_rata. If it is absent or invalid, order creation remains disabled (503). Do not set it until the business owner confirms the rule.
-  - ceil_minute: every started minute is billed at INR 3.
-  - pro_rata: duration is billed proportionally at INR 3/minute, rounded up to the nearest paise.
+- Uses the owner-confirmed exact-duration prorated price of INR 3/minute, with a minimum charge of INR 10.
+- Formula: amount in paise = max(1000, ceil(duration_seconds × 5)). This prorates by actual measured seconds and rounds any fraction of a paise upward.
+- Example: 80 seconds costs INR 10 because the minimum applies; 240 seconds costs INR 12; 90 seconds costs INR 10 because the minimum applies.
 - The server stores the expected amount and Razorpay order ID. The browser cannot set or change either.
 
 ## Webhook safeguards
@@ -30,7 +29,6 @@ This branch contains a server-side payment foundation only. It is not enabled fo
 - RAZORPAY_KEY_ID
 - RAZORPAY_KEY_SECRET
 - RAZORPAY_WEBHOOK_SECRET
-- BILLING_ROUNDING_MODE (must remain unset until confirmed)
 - Worker and Blob secrets are configured separately; never expose secrets in client code.
 
 ## Not complete
