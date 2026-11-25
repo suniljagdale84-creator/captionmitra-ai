@@ -90,11 +90,15 @@ export async function POST(request: Request) {
       request,
 
       getSignedToken: async (pathname, clientPayload) => {
+        if (!/^incoming\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,139}$/.test(pathname)) {
+          throw new Error("Invalid upload path.");
+        }
+
         let turnstileToken = "";
 
         try {
-          const payload = JSON.parse(clientPayload || "{}");
-          turnstileToken = payload.turnstileToken || "";
+          const payload = JSON.parse(clientPayload || "{}") as { turnstileToken?: unknown };
+          turnstileToken = typeof payload.turnstileToken === "string" ? payload.turnstileToken : "";
         } catch {
           throw new Error("Invalid CAPTCHA information.");
         }
@@ -112,12 +116,13 @@ export async function POST(request: Request) {
           throw new Error("CAPTCHA verification failed. Please try again.");
         }
 
+        const validUntil = Date.now() + 10 * 60 * 1000;
         const token = await issueSignedToken({
           pathname,
           operations: ["put"],
           allowedContentTypes: ALLOWED_CONTENT_TYPES,
           maximumSizeInBytes: MAX_FILE_SIZE,
-          validUntil: Date.now() + 10 * 60 * 1000,
+          validUntil,
         });
 
         return {
@@ -125,7 +130,7 @@ export async function POST(request: Request) {
           urlOptions: {
             allowedContentTypes: ALLOWED_CONTENT_TYPES,
             maximumSizeInBytes: MAX_FILE_SIZE,
-            validUntil: Date.now() + 10 * 60 * 1000,
+            validUntil,
             addRandomSuffix: true,
             allowOverwrite: false,
           },
