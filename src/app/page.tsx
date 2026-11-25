@@ -245,7 +245,11 @@ export default function Home() {
           <label className="fieldLabel" htmlFor="language"><Languages size={16}/> OUTPUT LANGUAGE</label>
           <select id="language" value={language} onChange={e => setLanguage(e.target.value)} disabled={busy}>{languages.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
         </div>
-        <div className="pricePreview">\n          <div><span className="fieldLabel">ESTIMATED PRICE</span><strong>{estimatedPaise == null ? "Duration pending" : `₹${(estimatedPaise / 100).toFixed(2)}`}</strong><small>{durationSeconds == null ? "Select a file with readable duration metadata" : `${Math.floor(durationSeconds / 60)}m ${Math.floor(durationSeconds % 60)}s · ₹3/min · ₹10 minimum`}</small></div>\n          <span className="priceTag">No subscription</span>\n        </div>\n        <p className="fieldLabel">SECURITY VERIFICATION</p>
+        <div className="pricePreview">
+          <div><span className="fieldLabel">ESTIMATED PRICE</span><strong>{estimatedPaise == null ? "Duration pending" : `₹${(estimatedPaise / 100).toFixed(2)}`}</strong><small>{durationSeconds == null ? "Select a file with readable duration metadata" : `${Math.floor(durationSeconds / 60)}m ${Math.floor(durationSeconds % 60)}s · ₹3/min · ₹10 minimum`}</small></div>
+          <span className="priceTag">No subscription</span>
+        </div>
+        <p className="fieldLabel">SECURITY VERIFICATION</p>
         <div ref={captchaRef} />
         {!siteKey && <small>Loading secure verification…</small>}
         {busy && <div className="success"><Loader2 className="spin" size={17}/> Uploading securely… {progress}%</div>}
