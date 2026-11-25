@@ -27,11 +27,11 @@ export async function updateJobProgress(pool, jobId, workerId, stage) {
 export function getPublicProgress(status, stage, percent) {
   const safeStatus = ["awaiting_upload","uploaded","awaiting_payment","payment_failed","queued","processing","completed","processing_failed","expired","cancelled"].includes(status)
     ? status : "unknown";
-  const safeStage = Object.hasOwn(STAGES, stage) ? stage : "queued";
+  const validStage = Object.hasOwn(STAGES, stage);
+  const safeStage = validStage ? stage : "queued";
   const numeric = Number(percent);
-  return {
-    status: safeStatus,
-    stage: safeStage,
-    percent: Number.isInteger(numeric) ? Math.max(0, Math.min(100, numeric)) : STAGES[safeStage]
-  };
+  const safePercent = !validStage || safeStatus === "unknown"
+    ? STAGES[safeStage]
+    : Number.isInteger(numeric) ? Math.max(0, Math.min(100, numeric)) : STAGES[safeStage];
+  return { status: safeStatus, stage: safeStage, percent: safePercent };
 }
