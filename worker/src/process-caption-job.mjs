@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { put, del } from "@vercel/blob";
 import { prepareTranscript } from "./prepare-transcript.mjs";
 import { completeJob } from "./queue.mjs";
+import { updateJobProgress } from "./job-progress.mjs";
 
 /**
  * Download -> extract -> transcribe -> translate -> package SRT/TXT -> private Blob.
@@ -14,7 +15,10 @@ export async function processCaptionJob(job, workerId, config, dependencies = {}
   const deleteBlob = dependencies.deleteBlob || del;
   const markComplete = dependencies.completeJob || completeJob;
 
-  const prepared = await prepare(job, config, dependencies.prepareDependencies || {});
+  const prepared = await prepare(job, config, {
+    ...(dependencies.prepareDependencies || {}),
+    onStage: (stage) => updateJobProgress(dependencies.pool, job.id, workerId, stage)
+  });
   const payload = JSON.stringify({
     version: 1,
     jobId: job.id,
@@ -32,6 +36,7 @@ export async function processCaptionJob(job, workerId, config, dependencies = {}
     throw new Error("Caption output exceeds the supported size limit");
   }
 
+  await updateJobProgress(dependencies.pool, job.id, workerId, "saving_result");
   const pathname = `captionmitra/results/${job.id}/${randomUUID()}.json`;
   const stored = await upload(pathname, payload, {
     access: "private",
