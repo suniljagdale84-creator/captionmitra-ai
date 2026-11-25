@@ -37,5 +37,5 @@ export async function prepareTranscript(job, config, dependencies = {}) {
       sourceLanguage: transcript.language || null,
       outputLanguage: targetLanguage
     };
-  }, dependencies.mediaDependencies || {});
+  }, { ...(dependencies.mediaDependencies || {}), onStage: dependencies.onStage });
 }
