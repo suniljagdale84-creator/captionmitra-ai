@@ -18,8 +18,9 @@ export async function cleanupExpiredJobs({ pool, blobToken, deleteBlob = del, ba
       "ORDER BY expires_at ASC FOR UPDATE SKIP LOCKED LIMIT $1",
       [batchSize]
     );
-    await client.query("COMMIT");
 
+    // Keep row locks until remote deletion and database updates finish. This prevents
+    // two cleanup workers from deleting the same expired job concurrently.
     for (const job of result.rows) {
       const paths = [job.source_blob_path, job.result_blob_path].filter(Boolean);
       let allDeleted = true;
@@ -46,7 +47,11 @@ export async function cleanupExpiredJobs({ pool, blobToken, deleteBlob = del, ba
         removed += 1;
       }
     }
+    await client.query("COMMIT");
     return { examined: result.rows.length, expiredJobs: removed, deletionFailures: failed };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }
