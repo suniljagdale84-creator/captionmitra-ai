@@ -8,7 +8,7 @@ const config = { blobReadWriteToken: "test-private-token" };
 test("creates private SRT/TXT result and completes the owned job", async () => {
   let uploaded, completed;
   const result = await processCaptionJob(job, "worker-1", config, {
-    pool: {},
+    pool: { query: async () => ({ rows: [{ id: job.id }] }) },
     prepareTranscript: async () => ({
       srt: "1\\n00:00:00,000 --> 00:00:01,000\\nNamaste\\n",
       txt: "Namaste\\n",
