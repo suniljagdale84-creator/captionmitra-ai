@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prepareTranscriptFiles } from "../src/prepare-transcript.mjs";
@@ -8,7 +8,7 @@ import { prepareTranscriptFiles } from "../src/prepare-transcript.mjs";
 test("creates timestamped SRT and plain text transcript", async () => {
   const root = await mkdtemp(join(tmpdir(), "captionmitra-output-"));
   try {
-    const result = await prepareTranscriptFiles({
+    const result = await prepareTranscript({
       id: "job-123",
       source_blob_path: "uploads/test.mp4",
       source_content_type: "video/mp4",
