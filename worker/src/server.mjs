@@ -8,6 +8,7 @@ import { runBlobCleanup } from "./cleanup.mjs";
 import { startCleanupScheduler, getCleanupStats } from "./cleanup-scheduler.mjs";
 import { runWorkerLoop } from "./worker-loop.mjs";
 import { processCaptionJob } from "./process-caption-job.mjs";
+import { getCustomerJobStatus } from "./customer-status.mjs";
 
 const config = loadWorkerConfig();
 const pool = createDatabase(config.databaseUrl);
@@ -97,7 +98,23 @@ const server = http.createServer(async (request, response) => {
   }
 
   const url = new URL(request.url || "/", "http://127.0.0.1");
-  const downloadMatch = url.pathname.match(/^\\/internal\\/customer\\/jobs\\/([0-9a-f-]{36})\\/download$/i);
+  const statusMatch = url.pathname.match(/^\\/api\\/customer\\/jobs\\/([0-9a-f-]{36})$/i);
+  if (request.method === "GET" && statusMatch) {
+    const accessToken = request.headers["x-customer-access-token"];
+    try {
+      const status = await getCustomerJobStatus({
+        pool,
+        jobId: statusMatch[1],
+        accessToken: Array.isArray(accessToken) ? "" : accessToken
+      });
+      send(response, 200, status);
+    } catch {
+      send(response, 404, { error: "job_status_unavailable" });
+    }
+    return;
+  }
+
+  const downloadMatch = url.pathname.match(/^\\/api\\/customer\\/jobs\\/([0-9a-f-]{36})\\/download$/i);
   if (request.method === "GET" && downloadMatch) {
     const accessToken = request.headers["x-customer-access-token"];
     const format = url.searchParams.get("format");
