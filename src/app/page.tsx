@@ -107,7 +107,7 @@ export default function Home() {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "media-upload";
       const result = await upload(`incoming/${Date.now()}-${safeName}`, file, {
         access: "private",
-        multipart: true,
+        // Vercel recommends multipart for files larger than 100 MB. The SDK splits and retries parts automatically.\n        multipart: file.size > 100 * 1024 * 1024,
         contentType: file.type,
         handleUploadUrl: "/api/upload",
         clientPayload: JSON.stringify({ turnstileToken: captchaToken }),
@@ -143,12 +143,12 @@ export default function Home() {
         <div className="languagePills"><span>Hindi</span><span>Marathi</span><span>Hinglish</span><span>English</span></div>
       </section>
       <section className="workspace">
-        <div className="sectionHead"><div><h2>Upload your media</h2><p>Choose a video or audio file up to 200 MB.</p></div><div className="step">01 <span>/ 03</span></div></div>
+        <div className="sectionHead"><div><h2>Upload your media</h2><p>Choose a video or audio file up to 200 MB. Files above 100 MB upload in automatic parts.</p></div><div className="step">01 <span>/ 03</span></div></div>
         <label className="uploadBox">
           <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/flac,audio/webm" onChange={e => chooseFile(e.target.files?.[0] || null)} disabled={busy}/>
           <span className="uploadIcon"><UploadCloud size={27}/></span>
           <strong>{file ? file.name : "Choose a video or audio file"}</strong>
-          <small>{file ? `${(file.size / (1024*1024)).toFixed(1)} MB selected` : "MP4, MOV, WebM, AVI, MKV, MP3, WAV and more · Max 200 MB"}</small>
+          <small>{file ? `${(file.size / (1024*1024)).toFixed(1)} MB selected` : "MP4, MOV, WebM, AVI, MKV, MP3, WAV and more · Max 200 MB · Large files split automatically"}</small>
           <span className="browse">Browse files</span>
         </label>
         <div className="formRow">
