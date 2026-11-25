@@ -67,17 +67,17 @@ export async function POST(request: Request) {
       const job = found.rows[0];
       if (job && refund.status === "processed" && Number(job.amount_paise) === refund.amount) {
         await client.query(
-          "UPDATE caption_jobs SET refund_status = 'refunded', refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
-          [job.id]
+          "UPDATE caption_jobs SET refund_status = 'refunded', refunded_amount_paise = refunded_amount_paise + $2, refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
+          [job.id, refund.amount]
+        );
+      } else if (job && refund.status === "processed") {
+        await client.query(
+          "UPDATE caption_jobs SET refund_status = 'partially_refunded', refunded_amount_paise = refunded_amount_paise + $2, refunded_at = NOW(), updated_at = NOW() WHERE id = $1",
+          [job.id, refund.amount]
         );
       } else if (job && refund.status === "failed") {
         await client.query(
           "UPDATE caption_jobs SET refund_status = 'failed', updated_at = NOW() WHERE id = $1",
-          [job.id]
-        );
-      } else if (job && refund.status === "processed") {
-        await client.query(
-          "UPDATE caption_jobs SET refund_status = 'refund_pending', updated_at = NOW() WHERE id = $1",
           [job.id]
         );
       }
