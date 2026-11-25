@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareTranscriptFiles } from "../src/prepare-transcript.mjs";
+import { prepareTranscript } from "../src/prepare-transcript.mjs";
 
-test("creates timestamped SRT and plain text transcript", async () => {
+test("creates translated timestamped SRT and TXT content, then removes temp files", async () => {
   const root = await mkdtemp(join(tmpdir(), "captionmitra-output-"));
   try {
     const result = await prepareTranscript({
@@ -55,8 +55,10 @@ test("creates timestamped SRT and plain text transcript", async () => {
       }
     });
     assert.equal(result.segmentCount, 1);
-    assert.match(await readFile(result.srtPath, "utf8"), /00:00:00,000 --> 00:00:02,500/);
-    assert.equal(await readFile(result.txtPath, "utf8"), "Hello CaptionMitra\n");
+    assert.match(result.srt, /00:00:00,000 --> 00:00:02,500/);
+    assert.match(result.srt, /नमस्ते CaptionMitra/);
+    assert.equal(result.txt, "नमस्ते CaptionMitra\n");
+    assert.deepEqual(await readdir(root), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
