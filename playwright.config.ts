@@ -23,6 +23,7 @@ export default defineConfig({
       OPENAI_API_KEY: "ci-placeholder-not-a-real-key",
       SITE_KEY: "1x00000000000000000000AA",
       TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+      RAZORPAY_WEBHOOK_SECRET: "ci-webhook-secret-only",
     },
   },
 });
