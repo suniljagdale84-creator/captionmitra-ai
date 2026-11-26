@@ -315,7 +315,7 @@ export default function Home() {
           <span className="priceTag">No subscription</span>
         </div>
         <p className="fieldLabel">SECURITY VERIFICATION</p>
-        <div ref={captchaRef} />
+        <div ref={captchaRef} className="captchaBox" />
         {!siteKey && <small>Loading secure verification…</small>}
         {busy && <div className="success"><Loader2 className="spin" size={17}/> Uploading securely… {progress}%</div>}
         {busy && <div style={{height:8,background:"#e5e7eb",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",width:`${progress}%`,background:"#2563eb",transition:"width .2s"}} /></div>}
