@@ -45,7 +45,7 @@ export async function probeMedia(filePath, runCommand = runMediaCommand) {
   await assertValidMediaFile(filePath);
   const { stdout } = await runCommand("ffprobe", [
     "-v", "error",
-    "-show_entries", "format=duration:format_name",
+    "-show_entries", "format=duration,format_name",
     "-of", "json",
     filePath
   ], { timeoutMs: 30_000 });
