@@ -65,3 +65,15 @@ jobs:
           OPENAI_API_KEY: ci-placeholder-not-a-real-key
           SITE_KEY: 1x00000000000000000000AA
           TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run responsive browser checks
+        run: |
+          npm run start -- --hostname 127.0.0.1 &
+          npx wait-on http://127.0.0.1:3000
+          npm run test:e2e
+        env:
+          OPENAI_API_KEY: ci-placeholder-not-a-real-key
+          SITE_KEY: 1x00000000000000000000AA
+          TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
