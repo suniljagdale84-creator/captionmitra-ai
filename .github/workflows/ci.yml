@@ -51,6 +51,8 @@ jobs:
         run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/tests/media_inspection_lease_test.sql
       - name: Test Razorpay webhook signature helper
         run: node --test src/lib/razorpay-webhook-signature.test.mjs
+      - name: Test Razorpay webhook event validation
+        run: node --test src/lib/razorpay-event-validation.test.mjs
       - name: Install worker dependencies
         working-directory: worker
         run: npm install --no-audit --no-fund
