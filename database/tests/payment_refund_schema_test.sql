@@ -60,10 +60,16 @@ BEGIN
     )
     SELECT id, 'rfnd_schema_test_invalid_amount', provider_payment_id, 0, 'INR', 'processed'
       FROM caption_jobs WHERE id = v_job;
-    RAISE EXCEPTION 'Zero-value refund was unexpectedly accepted';
   EXCEPTION WHEN check_violation THEN
     NULL;
   END;
+  IF EXISTS (
+    SELECT 1 FROM caption_payment_refunds
+     WHERE provider = 'razorpay'
+       AND provider_refund_id = 'rfnd_schema_test_invalid_amount'
+  ) THEN
+    RAISE EXCEPTION 'Zero-value refund was unexpectedly accepted';
+  END IF;
 
   -- Reusing an event ID with a different digest must be detectable by lookup.
   INSERT INTO payment_webhook_events (provider, provider_event_id, payload_sha256)
