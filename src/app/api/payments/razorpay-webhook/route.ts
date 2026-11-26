@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { readLimitedBody } from "@/lib/read-limited-body.mjs";
 import { razorpayAmountMatches } from "@/lib/razorpay-amount.mjs";
 import { verifyRazorpayWebhookSignature } from "@/lib/razorpay-webhook-signature.mjs";
+import { isValidCapturedPayment, isValidFailedPayment, isValidRefund } from "@/lib/razorpay-event-validation.mjs";
 
 export const runtime = "nodejs";
 
@@ -44,11 +45,7 @@ export async function POST(request: Request) {
   if (payload?.event === "refund.processed" || payload?.event === "refund.failed") {
     const refund = payload?.payload?.refund?.entity;
     const expectedRefundStatus = payload.event === "refund.processed" ? "processed" : "failed";
-    if (!refund || typeof refund.id !== "string" ||
-        typeof refund.payment_id !== "string" ||
-        !Number.isSafeInteger(refund.amount) || refund.amount <= 0 ||
-        refund.currency !== "INR" ||
-        refund.status !== expectedRefundStatus) {
+    if (!isValidRefund(refund, expectedRefundStatus)) {
       return NextResponse.json({ error: "Invalid refund details." }, { status: 400 });
     }
     const digest = createHash("sha256").update(raw).digest("hex");
@@ -145,8 +142,7 @@ export async function POST(request: Request) {
   }
   if (payload?.event === "payment.failed") {
     const failedPayment = payload?.payload?.payment?.entity;
-    if (!failedPayment || typeof failedPayment.id !== "string" ||
-        typeof failedPayment.order_id !== "string" || failedPayment.status !== "failed") {
+    if (!isValidFailedPayment(failedPayment)) {
       return NextResponse.json({ error: "Invalid failed payment details." }, { status: 400 });
     }
     const digest = createHash("sha256").update(raw).digest("hex");
@@ -198,8 +194,7 @@ export async function POST(request: Request) {
   if (payload?.event !== "payment.captured") return NextResponse.json({ received: true });
 
   const payment = payload?.payload?.payment?.entity;
-  if (!payment || typeof payment.id !== "string" || typeof payment.order_id !== "string" ||
-      !Number.isSafeInteger(payment.amount) || payment.currency !== "INR" || payment.status !== "captured") {
+  if (!isValidCapturedPayment(payment)) {
     return NextResponse.json({ error: "Invalid captured payment details." }, { status: 400 });
   }
 
