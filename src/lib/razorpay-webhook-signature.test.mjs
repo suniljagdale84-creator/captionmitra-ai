@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { verifyRazorpayWebhookSignature } from "../src/lib/razorpay-webhook-signature.mjs";
+import { verifyRazorpayWebhookSignature } from "./razorpay-webhook-signature.mjs";
 
 const secret = "test-webhook-secret";
 const raw = Buffer.from('{"event":"payment.captured","value":1}');
