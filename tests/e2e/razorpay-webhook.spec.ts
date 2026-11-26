@@ -41,7 +41,8 @@ test("rejects malformed event identifiers even with a valid signature", async ({
 test("rejects malformed JSON after validating the raw-body signature", async ({ request }) => {
   const raw = '{"event":';
   const response = await request.post(webhookUrl, {
-    data: raw,
+    // Send the malformed JSON as raw bytes so the signed payload is not JSON-serialized.
+    data: Buffer.from(raw, "utf8"),
     headers: signedHeaders(raw),
   });
 
