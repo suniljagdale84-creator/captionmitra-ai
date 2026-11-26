@@ -15,6 +15,29 @@ async function claimInspection(pool, workerId) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Recover inspections abandoned by a crashed worker. The attempt count is
+    // incremented at claim time, so exhausted leases become terminal failures.
+    const expired = await client.query(
+      `UPDATE caption_media_inspections
+       SET status = CASE WHEN attempt_count >= 3 THEN 'failed' ELSE 'pending' END,
+           available_at = NOW(),
+           locked_at = NULL,
+           locked_by = NULL,
+           last_error_code = 'inspection_lease_expired',
+           updated_at = NOW()
+       WHERE status = 'processing'
+         AND locked_at < NOW() - INTERVAL '5 minutes'
+       RETURNING job_id, status`
+    );
+    for (const row of expired.rows) {
+      if (row.status === "failed") {
+        await client.query(
+          `INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
+           VALUES ($1, 'awaiting_payment', 'awaiting_payment', 'media_inspection_lease_expired')`,
+          [row.job_id]
+        );
+      }
+    }
     const result = await client.query(
       `WITH candidate AS (
          SELECT inspection.job_id
