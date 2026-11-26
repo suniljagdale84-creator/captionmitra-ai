@@ -53,10 +53,16 @@ jobs:
         run: node --test src/lib/razorpay-webhook-signature.test.mjs
       - name: Test Razorpay webhook event validation
         run: node --test src/lib/razorpay-event-validation.test.mjs
+      - name: Install FFmpeg and FFprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Install worker dependencies
         working-directory: worker
         run: npm install --no-audit --no-fund
-      - name: Test worker modules
+      - name: Test worker modules including real media integration
         working-directory: worker
         run: npm test && npm run check
       - name: Build Next.js application
