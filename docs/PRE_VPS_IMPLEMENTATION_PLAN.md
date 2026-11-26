@@ -1,45 +1,49 @@
 # CaptionMitra pre-VPS implementation plan
 
-This branch is for preparing and validating CaptionMitra before purchasing a VPS.
-Do not deploy this branch to production until the relevant checks pass.
+This branch prepares and validates CaptionMitra before any VPS purchase. Do not merge or deploy this branch to production until the owner approves and staging checks pass.
 
-## Business rules
-- Customer price: INR 3 per video minute.
-- Minimum charge: INR 10.
-- No subscription, compulsory recharge, or stored unused wallet balance.
+## Confirmed business rules
+- INR 3 per minute, prorated by exact measured duration.
+- Minimum charge INR 10; fractional paise rounded upward.
+- Per-video payment only; no subscription, compulsory recharge, or unused wallet balance.
 - Payment must be verified server-side before processing starts.
-- Temporary source media must be deleted after success or failure.
-- Initial VPS budget target: about INR 1,500/month; do not purchase until setup and provider checks are complete.
+- Customer selects and uploads one whole file; multipart transfer is handled automatically by the browser SDK for files above 100 MB.
+- Maximum target upload size: 200 MiB.
+- Temporary source media must be deleted after terminal processing outcomes.
+- VPS budget target is about INR 1,500/month; do not purchase until setup and provider checks are complete.
 
-## Current repository audit (2026-11-25)
-- Next.js 14.2.21 app with an existing subtitle editor and SRT/TXT downloads.
-- `src/app/api/captions/route.ts` still accepts multipart uploads directly and rejects files above 25 MB.
-- `src/app/page.tsx` still posts the selected file directly to `/api/captions`.
-- `src/app/api/upload/route.ts` already issues Vercel Blob presigned upload authorization for up to 200 MB and verifies Cloudflare Turnstile.
-- The browser UI now uses the Vercel Blob presigned client-upload flow and enables multipart uploads for files larger than 100 MB. Customers still select and upload one complete file.
-- The upload UI stores the returned private Blob pathname only in its local success state; it does not start processing yet.
-- No payment, durable job queue, or automatic source-file cleanup workflow is present in the inspected application files.
+## Implemented on the preparation branch
+- Private Vercel Blob presigned upload with Cloudflare Turnstile authorization and a 200 MiB cap.
+- Browser upload progress and automatic multipart mode above 100 MiB.
+- Job creation verifies private Blob metadata server-side and stores a hashed per-job customer access token.
+- Pre-payment media-inspection queue downloads the private object and uses FFprobe to measure duration; browser duration is display-only.
+- Server pricing formula is `max(1000, ceil(duration_seconds * 5))` paise.
+- Razorpay order creation is gated on successful server-side duration inspection.
+- Webhook helpers validate signatures and payment/refund event data; verified captured payment is required before paid-job queue claims.
+- Separate Node.js worker pipeline for FFmpeg extraction, bounded audio chunks, timestamped transcription, Hindi/Marathi/English/Hinglish output translation, SRT/TXT packaging and private result storage.
+- Durable cleanup queue and scheduler for eligible temporary source media and expired result objects.
+- Customer status and download routes proxy to the worker using per-job customer credentials.
+- PostgreSQL migrations, SQL persistence/lease tests, worker unit tests, webhook helper tests and Playwright responsive viewport checks are in CI.
 
-## Implementation sequence
-1. ~~Wire browser upload to the existing presigned upload endpoint; validate file size/type and show progress/errors.~~ Implemented on the preparation branch; GitHub Actions build passed for the latest upload commit. End-to-end Blob upload still needs a real staging test.
-2. Design a private temporary-object lifecycle and authenticated processing handoff. Do not expose private media URLs or trust client-supplied duration/pricing. See `docs/WORKER_ARCHITECTURE.md`.
-3. Build a separate worker service suitable for Ubuntu VPS with FFmpeg, bounded concurrency, job status, retries, and guaranteed cleanup in a finally path.
-4. Add transcription/translation adapters with configurable provider/model and server-side cost/size/time limits.
-5. Connect results to the existing editable subtitle UI and SRT/TXT exports.
-6. Add server-side price calculation at INR 3/minute prorated by exact measured duration, rounded up to the nearest paise, with a minimum INR 10, plus payment gateway order/webhook verification. Confirm refund policy before production.
-7. Add abuse controls, privacy/retention policy, logs without media contents, and automated tests.
-8. Run end-to-end tests on a staging environment before VPS purchase.
-9. Only after acceptance, purchase the monthly VPS and deploy.
+## Latest automated validation
+- PR #1 remains Draft and unmerged; production `main` is unchanged.
+- Latest known branch head after responsive test improvement: `07cff8c8f889106a7a16c82260d0dac8bf182e70`.
+- GitHub Actions CI run #434 passed, including PostgreSQL migration and persistence tests, worker tests, Next.js production build and responsive Playwright checks at 320–1440 px.
+- Vercel status check for that commit reported success. This does not mean the worker is deployed or that live Blob upload/processing has been tested.
 
-## Validation status (2026-11-25)
-- Latest upload branch commit: `d291ecc1ec56564b7b9a83776233eb345d1c228c`.
-- GitHub Actions build: passed (`CaptionMitra CI`).
-- Draft PR #1 remains open and unmerged. Production `main` is unchanged.
-- No real 200 MB upload, private Blob retrieval, worker processing, or deletion test has been completed. Do not describe upload or processing as production-ready.
+## Outstanding work before launch
+1. Run real staging upload tests, including a file above 100 MiB, verify single-file customer experience, object metadata and retry behavior.
+2. Deploy worker only to a controlled staging environment and test FFprobe/FFmpeg, all four output languages, OpenAI API behavior, result download and cleanup end-to-end.
+3. Exercise abrupt worker shutdown/restart and verify inspection and paid-job lease recovery against a live staging database.
+4. Add route-level Razorpay test-mode integration tests for checkout, signed webhooks, duplicates/replays, payment failure and refunds.
+5. Review upload/job rate limits, abuse controls, provider cost limits, monitoring, backup and incident handling.
+6. Decide customer-facing result retention and privacy policy. The current database default expiry of 24 hours is not yet an owner-approved customer promise.
+7. Compare VPS providers and total monthly costs before purchase. No VPS purchase or deployment without explicit approval.
+8. Only after staging acceptance and owner approval, plan production deployment and enable live payment credentials.
 
 ## Safety constraints
-- Never commit API keys, payment secrets, or environment files.
-- Do not process a paid job based only on a browser success message; verify payment on the server.
-- Make webhook handling idempotent.
+- Never commit API keys, payment secrets, database credentials, or environment files.
+- Never process a job based only on a browser success message; verify payment on the server.
+- Keep webhook handling idempotent.
 - Limit worker concurrency and API spend.
-- Do not promise 200 MB processing until upload, download, FFmpeg, transcription, and cleanup have passed end-to-end tests.
+- Do not promise 200 MiB processing until upload, download, FFmpeg, transcription, result delivery and cleanup pass end-to-end tests.
