@@ -148,6 +148,18 @@ export async function inspectOneUploadedMedia({ pool, config, workerId = randomU
   const download = dependencies.downloadPrivateBlob || downloadPrivateBlob;
   const probe = dependencies.probeMedia || probeMedia;
   let workDir;
+  let lostLease = false;
+  const heartbeat = setInterval(() => {
+    void pool.query(
+      `UPDATE caption_media_inspections
+       SET locked_at = NOW(), updated_at = NOW()
+       WHERE job_id = $1 AND status = 'processing' AND locked_by = $2`,
+      [job.id, workerId]
+    ).then(result => {
+      if (result.rowCount !== 1) lostLease = true;
+    }).catch(() => { lostLease = true; });
+  }, 30_000);
+  heartbeat.unref?.();
   try {
     if (!ALLOWED_TYPES.has(String(job.source_content_type || "").toLowerCase())) {
       throw new Error("unsupported_media_type");
@@ -177,6 +189,7 @@ export async function inspectOneUploadedMedia({ pool, config, workerId = randomU
       throw new Error("unsupported_media_duration");
     }
     const amountPaise = calculatePricePaise(metadata.durationSeconds);
+    if (lostLease) throw new Error("inspection_lease_lost");
     await completeInspection(pool, job, workerId, metadata.durationSeconds, amountPaise);
     return { jobId: job.id, durationSeconds: metadata.durationSeconds, amountPaise };
   } catch (error) {
@@ -185,6 +198,7 @@ export async function inspectOneUploadedMedia({ pool, config, workerId = randomU
     await failInspection(pool, job.id, workerId, Number(job.attempt_count), code);
     return { jobId: job.id, failed: Number(job.attempt_count) >= 3 };
   } finally {
+    clearInterval(heartbeat);
     if (workDir) await removeTemp(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
