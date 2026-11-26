@@ -49,6 +49,13 @@ test("pre-payment inspection measures duration and stores prorated price from se
       }
     });
     assert.deepEqual(result, { jobId: "job-1", durationSeconds: 241, amountPaise: 1205 });
+    const recoveryIndex = pool.calls.findIndex(call =>
+      call.sql.includes("locked_at < NOW() - INTERVAL '5 minutes'") &&
+      call.sql.includes("inspection_lease_expired")
+    );
+    const claimIndex = pool.calls.findIndex(call => call.sql.includes("WITH candidate AS"));
+    assert.ok(recoveryIndex >= 0, "stale inspection leases must be recovered");
+    assert.ok(claimIndex > recoveryIndex, "lease recovery must run before claiming pending work");
     assert.ok(pool.calls.some(call => call.sql.includes("media_duration_seconds = $2") && call.values[1] === 241));
     assert.ok(pool.calls.some(call => call.sql.includes("amount_paise = $3") && call.values[2] === 1205));
     assert.ok(pool.calls.some(call => call.sql.includes("status = 'completed'")));
