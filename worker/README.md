@@ -1,19 +1,20 @@
 # CaptionMitra Worker (pre-deployment)
 
-Separate Node.js 20+ service intended to run on the future Ubuntu VPS. The server code starts both the pre-payment media-inspection loop and the paid-job processing loop when the service starts. This worker has **not** been deployed or connected to a live customer environment.
+Separate Node.js 20+ service intended for the future Ubuntu VPS. The server starts the pre-payment media-inspection loop, paid-job processing loop, and durable Blob cleanup scheduler. This worker has **not** been deployed or connected to a live customer environment.
 
 ## Included
 
 - PostgreSQL connection pool with bounded connections and timeouts.
-- Pre-payment inspection polling for uploaded jobs in `awaiting_payment`: private Blob download, FFprobe duration check, exact-duration price calculation, and temporary-directory cleanup.
-- Paid-job polling for `queued` jobs. The queue claim SQL requires both `payment_verified_at` and `provider_payment_id`, so an unpaid job is not eligible.
+- Pre-payment inspection: private Blob download, FFprobe duration check, exact-duration price calculation, and temporary-directory cleanup.
+- Inspection leases with heartbeat and stale-lease recovery: after a five-minute stale lease, attempts below three return to pending; exhausted attempts are marked failed.
+- Paid-job polling. Queue claims require verified payment and a provider payment ID, so unpaid jobs are not eligible.
 - PostgreSQL queue claims using transactions and `FOR UPDATE SKIP LOCKED`.
 - Worker-owned leases, processing heartbeats, stale paid-job lease recovery, retry backoff and bounded retry count.
-- Caption processing pipeline: private Blob download, FFmpeg audio extraction, eight-minute audio chunks (each checked against a 20 MB ceiling), timestamped transcription, optional translation, SRT/TXT generation and private result upload.
+- Caption processing: private Blob download, FFmpeg audio extraction, eight-minute audio chunks (each checked against a 20 MB ceiling), timestamped transcription, translation, SRT/TXT generation and private result upload.
 - Temporary media directory removal in `finally` blocks.
-- Scheduled Blob cleanup.
+- Durable, retryable private Blob cleanup for eligible source and expired result objects.
 - Loopback-only HTTP health/status and customer status/download endpoints. Internal worker status and manual cleanup endpoints require the shared bearer secret.
-- Strict configuration checks and unit tests.
+- Strict configuration checks and automated unit/SQL tests.
 
 ## Environment (never commit real values)
 
@@ -44,9 +45,9 @@ The service binds to `127.0.0.1` by default. Put it behind a TLS reverse proxy/f
 ## Not yet verified / launch blockers
 
 - The worker is not deployed; no customer jobs are being processed by a live worker.
-- No staging end-to-end test has yet exercised PostgreSQL, private Blob storage, FFprobe/FFmpeg, OpenAI transcription/translation, result downloads and cleanup together.
-- The media-inspection loop has bounded retry attempts, but inspection-job lease recovery after an abrupt worker crash still needs review/implementation.
+- No staging end-to-end test has exercised PostgreSQL, private Blob storage, FFprobe/FFmpeg, OpenAI transcription/translation, result downloads and cleanup together.
+- CI includes a PostgreSQL lease-recovery SQL test and worker unit tests, but an abrupt process kill/restart test against a running staging worker remains outstanding.
 - Razorpay test-mode checkout, signed webhook delivery, duplicate/replay cases and refund scenarios still need route-level integration tests.
 - Production secrets, webhook configuration, VPS setup and production deployment are not included.
 
-Do not send customer jobs to this worker until staging end-to-end checks pass. Only server-verified paid jobs may enter the caption-processing queue.
+Do not send customer jobs to this worker until staging end-to-end checks pass. Only server-verified paid jobs may enter the caption-processing queue. The current 24-hour job expiry in the database is an implementation default, not an approved customer-facing retention policy; confirm retention wording and behavior before launch.
