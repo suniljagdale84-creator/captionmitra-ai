@@ -1,8 +1,9 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
 import { readLimitedBody } from "@/lib/read-limited-body.mjs";
 import { razorpayAmountMatches } from "@/lib/razorpay-amount.mjs";
+import { verifyRazorpayWebhookSignature } from "@/lib/razorpay-webhook-signature.mjs";
 
 export const runtime = "nodejs";
 
@@ -14,11 +15,6 @@ function pool() {
     connectionTimeoutMillis: 5000, statement_timeout: 8000, application_name: "captionmitra-webhook"
   });
   return globalThis.captionMitraWebhookPool;
-}
-function validSignature(raw: string, signature: string, secret: string) {
-  const expected = createHmac("sha256", secret).update(raw).digest("hex");
-  const a = Buffer.from(expected, "hex"), b = Buffer.from(signature, "hex");
-  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
 export async function POST(request: Request) {
@@ -39,7 +35,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: "Invalid webhook body." }, { status: 400 });
   }
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(eventId) || !validSignature(raw, signature, secret)) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(eventId) || !verifyRazorpayWebhookSignature(raw, signature, secret)) {
     return NextResponse.json({ error: "Invalid webhook signature." }, { status: 400 });
   }
 
