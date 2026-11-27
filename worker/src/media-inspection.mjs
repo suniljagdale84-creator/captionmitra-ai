@@ -31,11 +31,21 @@ async function claimInspection(pool, workerId) {
     );
     for (const row of expired.rows) {
       if (row.status === "failed") {
-        await client.query(
-          `INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
-           VALUES ($1, 'awaiting_payment', 'awaiting_payment', 'media_inspection_lease_expired')`,
+        const failedJob = await client.query(
+          `UPDATE caption_jobs
+           SET status = 'processing_failed', error_code = 'media_inspection_lease_expired',
+               progress_stage = 'failed', progress_updated_at = NOW(), updated_at = NOW()
+           WHERE id = $1 AND status = 'awaiting_payment'
+           RETURNING id`,
           [row.job_id]
         );
+        if (failedJob.rows[0]) {
+          await client.query(
+            `INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
+             VALUES ($1, 'awaiting_payment', 'processing_failed', 'media_inspection_lease_expired')`,
+            [row.job_id]
+          );
+        }
       }
     }
     const result = await client.query(
@@ -114,21 +124,33 @@ async function failInspection(pool, jobId, workerId, attemptCount, errorCode) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(
+    const inspection = await client.query(
       `UPDATE caption_media_inspections
        SET status = CASE WHEN attempt_count >= 3 THEN 'failed' ELSE 'pending' END,
            available_at = NOW() + INTERVAL '15 seconds',
            locked_at = NULL, locked_by = NULL,
            last_error_code = $3, updated_at = NOW()
-       WHERE job_id = $1 AND status = 'processing' AND locked_by = $2`,
+       WHERE job_id = $1 AND status = 'processing' AND locked_by = $2
+       RETURNING status`,
       [jobId, workerId, errorCode]
     );
-    if (attemptCount >= 3) {
-      await client.query(
-        `INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
-         VALUES ($1, 'awaiting_payment', 'awaiting_payment', 'media_inspection_failed')`,
-        [jobId]
+    if (attemptCount >= 3 && inspection.rows[0]?.status === "failed") {
+      const failedJob = await client.query(
+        `UPDATE caption_jobs
+         SET status = 'processing_failed', error_code = $2,
+             progress_stage = 'failed', progress_percent = 0,
+             progress_updated_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND status = 'awaiting_payment'
+         RETURNING id`,
+        [jobId, errorCode]
       );
+      if (failedJob.rows[0]) {
+        await client.query(
+          `INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
+           VALUES ($1, 'awaiting_payment', 'processing_failed', 'media_inspection_failed')`,
+          [jobId]
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -153,9 +175,8 @@ export async function inspectOneUploadedMedia({ pool, config, workerId = randomU
     void pool.query(
       `UPDATE caption_media_inspections
        SET locked_at = NOW(), updated_at = NOW()
-       WHERE job_id = $1 AND status = 'processing' AND locked_by = $2`,
-      [job.id, workerId]
-    ).then(result => {
+       WHERE job_id = $1 AND status = 'processing' AND locked_by = $2`
+    , [job.id, workerId]).then(result => {
       if (result.rowCount !== 1) lostLease = true;
     }).catch(() => { lostLease = true; });
   }, 30_000);
