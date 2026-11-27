@@ -10,8 +10,9 @@ function fakePool(job) {
   const client = {
     async query(sql, values) {
       calls.push({ sql, values });
-      if (sql.includes("RETURNING job.id")) return { rows: [{ ...job, attempt_count: 1 }] };
+      if (sql.includes("RETURNING job.id")) return { rows: [{ ...job, attempt_count: job.attemptCount ?? 1 }] };
       if (sql.includes("RETURNING job_id")) return { rows: [{ job_id: job.id }] };
+      if (sql.includes("RETURNING status")) return { rows: [{ status: "failed" }] };
       if (sql.includes("RETURNING id")) return { rows: [{ id: job.id }] };
       return { rows: [] };
     },
@@ -109,7 +110,7 @@ test("inspection failure retries safely and removes temporary media", async () =
     source_blob_path: "incoming/broken-video.mp4",
     source_size_bytes: 120,
     source_content_type: "video/mp4",
-    attempt_count: 1
+    attemptCount: 3
   };
   const pool = fakePool(job);
   try {
@@ -130,8 +131,10 @@ test("inspection failure retries safely and removes temporary media", async () =
         probeMedia: async () => { throw new Error("ffprobe_failed"); }
       }
     });
-    assert.deepEqual(result, { jobId: "job-3", failed: false });
+    assert.deepEqual(result, { jobId: "job-3", failed: true });
     assert.ok(pool.calls.some(call => call.sql.includes("status = CASE WHEN attempt_count >= 3 THEN 'failed' ELSE 'pending' END")));
+    assert.ok(pool.calls.some(call => call.sql.includes("SET status = 'processing_failed'") && call.values?.[1] === "ffprobe_failed"));
+    assert.ok(pool.calls.some(call => call.sql.includes("'processing_failed', 'media_inspection_failed'")));
     assert.ok(pool.calls.some(call => call.values?.[2] === "ffprobe_failed"));
     assert.deepEqual(await readdir(root), []);
   } finally {
