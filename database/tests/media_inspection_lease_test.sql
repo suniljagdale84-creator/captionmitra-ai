@@ -56,17 +56,30 @@ BEGIN
     RAISE EXCEPTION 'Exhausted inspection lease was not marked failed';
   END IF;
 
+  WITH failed_job AS (
+    UPDATE caption_jobs
+       SET status = 'processing_failed',
+           error_code = 'media_inspection_lease_expired',
+           progress_stage = 'failed',
+           progress_updated_at = NOW(),
+           updated_at = NOW()
+     WHERE id = v_exhausted_job AND status = 'awaiting_payment'
+     RETURNING id
+  )
   INSERT INTO caption_job_events (job_id, from_status, to_status, event_code)
-  SELECT v_exhausted_job, 'awaiting_payment', 'awaiting_payment', 'media_inspection_lease_expired'
-  WHERE EXISTS (
-    SELECT 1 FROM caption_media_inspections
-    WHERE job_id = v_exhausted_job AND status = 'failed'
-  );
+  SELECT id, 'awaiting_payment', 'processing_failed', 'media_inspection_lease_expired'
+    FROM failed_job;
+
+  SELECT status INTO v_status FROM caption_jobs WHERE id = v_exhausted_job;
+  IF v_status <> 'processing_failed' THEN
+    RAISE EXCEPTION 'Exhausted inspection did not mark the customer job as failed';
+  END IF;
 
   SELECT COUNT(*) INTO v_events FROM caption_job_events
-   WHERE job_id = v_exhausted_job AND event_code = 'media_inspection_lease_expired';
+   WHERE job_id = v_exhausted_job AND event_code = 'media_inspection_lease_expired'
+     AND to_status = 'processing_failed';
   IF v_events <> 1 THEN
-    RAISE EXCEPTION 'Expected one audit event for exhausted inspection lease';
+    RAISE EXCEPTION 'Expected one terminal audit event for exhausted inspection lease';
   END IF;
 END $$;
 
