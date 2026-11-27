@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from "react";
-import { UploadCloud, Captions, Languages, Download, Sparkles, Loader2, FileVideo, CheckCircle2 } from "lucide-react";
+import Script from "next/script";
+import { useEffect, useRef, useState } from "react";
+import { uploadPresigned } from "@vercel/blob/client";
+import { UploadCloud, Captions, Languages, Loader2, FileVideo, CheckCircle2, ShieldCheck } from "lucide-react";
 
-type Segment = { start: number; end: number; text: string };
-
+const MAX_FILE_SIZE = 200 * 1024 * 1024;
+const ALLOWED_TYPES = new Set([
+  "video/mp4", "video/quicktime", "video/webm", "video/x-msvideo",
+  "video/x-matroska", "audio/mpeg", "audio/mp3", "audio/wav",
+  "audio/x-wav", "audio/mp4", "audio/aac", "audio/ogg",
+  "audio/flac", "audio/webm",
+]);
 const languages = [
   { value: "Hindi", label: "Hindi" },
   { value: "Marathi", label: "Marathi" },
@@ -12,81 +19,328 @@ const languages = [
   { value: "English", label: "English" },
 ];
 
-function stamp(seconds: number) {
-  const ms = Math.max(0, Math.floor(seconds * 1000));
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const milli = ms % 1000;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;
+declare global {
+  interface Window {
+    Razorpay?: new (options: {
+      key: string;
+      amount: number;
+      currency: string;
+      name: string;
+      description: string;
+      order_id: string;
+      handler: (response: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => void;
+      modal?: { ondismiss?: () => void };
+      theme?: { color?: string };
+    }) => {
+      open: () => void;
+      on: (event: "payment.failed", callback: (response: { error?: { description?: string; reason?: string } }) => void) => void;
+    };
+    turnstile?: {
+      render: (container: HTMLElement, options: {
+        sitekey: string;
+        callback: (token: string) => void;
+        "expired-callback"?: () => void;
+        "error-callback"?: () => void;
+        theme?: "light" | "dark" | "auto";
+      }) => string;
+      reset: (widgetId?: string) => void;
+      remove: (widgetId: string) => void;
+    };
+  }
 }
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("Hindi");
-  const [segments, setSegments] = useState<Segment[]>([]);
+  const [siteKey, setSiteKey] = useState("");
+  const [turnstileReady, setTurnstileReady] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [customerStatus, setCustomerStatus] = useState<any>(null);
+  const [statusError, setStatusError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState("");
   const [error, setError] = useState("");
-  const [done, setDone] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
+  const [uploadedPath, setUploadedPath] = useState("");
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [jobInfo, setJobInfo] = useState<{ jobId: string; status: string; customerAccessToken: string } | null>(null);
+  const captchaRef = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
 
-  async function generate() {
-    if (!file) { setError("Please select a video or audio file first."); return; }
-    setBusy(true); setError(""); setDone(false); setSegments([]);
+  useEffect(() => {
+    if (!file) { setDurationSeconds(null); return; }
+    const media = document.createElement(file.type.startsWith("audio/") ? "audio" : "video");
+    const objectUrl = URL.createObjectURL(file);
+    media.preload = "metadata";
+    media.onloadedmetadata = () => setDurationSeconds(Number.isFinite(media.duration) ? media.duration : null);
+    media.onerror = () => setDurationSeconds(null);
+    media.src = objectUrl;
+    return () => { URL.revokeObjectURL(objectUrl); media.removeAttribute("src"); };
+  }, [file]);
+
+  useEffect(() => {
+    if (!jobInfo) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/customer/jobs/${jobInfo.jobId}`, {
+          headers: { "x-customer-access-token": jobInfo.customerAccessToken }, cache: "no-store"
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Status is temporarily unavailable.");
+        if (!cancelled) {
+          setCustomerStatus(data);
+          setStatusError("");
+          if (data.payment?.status === "verified") setPaymentMessage("Payment verified securely. Your video is now in the processing queue.");
+          else if (data.payment?.status === "failed") setPaymentMessage("Payment was not completed. You can retry securely.");
+        }
+      } catch (err) {
+        if (!cancelled) setStatusError(err instanceof Error ? err.message : "Status is temporarily unavailable.");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 8000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [jobInfo]);
+
+  const estimatedPaise = durationSeconds == null ? null : Math.max(1000, Math.ceil(durationSeconds * 5));
+
+  async function startPayment() {
+    if (!jobInfo || customerStatus?.inspection?.status !== "completed" || customerStatus?.payment?.status === "verified") return;
+    if (!window.Razorpay) { setPaymentMessage("Secure checkout is loading. Please try again in a moment."); return; }
+    setPaymentBusy(true);
+    setPaymentMessage("");
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("language", language);
-      const response = await fetch("/api/captions", { method: "POST", body: form });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Caption generation failed.");
-      setSegments(data.segments || []);
-      setDone(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-    } finally { setBusy(false); }
+      const response = await fetch("/api/payments/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ jobId: jobInfo.jobId, customerAccessToken: jobInfo.customerAccessToken })
+      });
+      const order = await response.json();
+      if (!response.ok) throw new Error(order.error || "Could not prepare payment.");
+      if (!order.orderId || !order.keyId || !Number.isSafeInteger(order.amountPaise) || order.amountPaise < 1000 || order.currency !== "INR") {
+        throw new Error("Payment order details could not be verified.");
+      }
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amountPaise,
+        currency: order.currency,
+        name: "CaptionMitra AI",
+        description: "Video captions · exact-duration pricing",
+        order_id: order.orderId,
+        handler: () => {
+          setPaymentMessage("Payment submitted. Waiting for secure confirmation from Razorpay…");
+        },
+        modal: {
+          ondismiss: () => setPaymentMessage("Checkout closed. Your job has not started; you can try payment again.")
+        },
+        theme: { color: "#2563eb" }
+      });
+      checkout.on("payment.failed", (response) => {
+        setPaymentMessage(response.error?.description || "Payment was not completed. Your video has not started processing; you can retry securely.");
+      });
+      checkout.open();
+    } catch (err) {
+      setPaymentMessage(err instanceof Error ? err.message : "Could not start secure payment.");
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
-  function download(kind: "srt" | "txt") {
-    const content = kind === "srt"
-      ? segments.map((s, i) => `${i+1}\n${stamp(s.start)} --> ${stamp(s.end)}\n${s.text}`).join("\n\n")
-      : segments.map(s => s.text).join("\n");
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `captionmitra.${kind}`; a.click();
-    URL.revokeObjectURL(url);
+  async function downloadCaption(format: "srt" | "txt") {
+    if (!jobInfo) return;
+    setDownloading(true);
+    setStatusError("");
+    try {
+      const response = await fetch(`/api/customer/jobs/${jobInfo.jobId}/download?format=${format}`, {
+        headers: { "x-customer-access-token": jobInfo.customerAccessToken }, cache: "no-store"
+      });
+      if (!response.ok) throw new Error("Download is not available yet.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = `captions.${format}`; anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setStatusError(err instanceof Error ? err.message : "Download failed.");
+    } finally { setDownloading(false); }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/upload", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load upload security settings.");
+        if (!cancelled) setSiteKey(data.siteKey);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load upload settings.");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!turnstileReady || !siteKey || !captchaRef.current || !window.turnstile || widgetIdRef.current) return;
+    widgetIdRef.current = window.turnstile.render(captchaRef.current, {
+      sitekey: siteKey,
+      theme: "auto",
+      callback: (token) => { setCaptchaToken(token); setError(""); },
+      "expired-callback": () => setCaptchaToken(""),
+      "error-callback": () => { setCaptchaToken(""); setError("Security check failed. Please refresh the CAPTCHA."); },
+    });
+    return () => {
+      if (widgetIdRef.current && window.turnstile) window.turnstile.remove(widgetIdRef.current);
+      widgetIdRef.current = null;
+    };
+  }, [turnstileReady, siteKey]);
+
+  function chooseFile(next: File | null) {
+    setFile(next);
+    setError("");
+    setUploaded(false);
+    setUploadedPath("");
+    setIdempotencyKey("");
+    setJobInfo(null);
+    setProgress(0);
+    setCaptchaToken("");
+    if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    if (!next) return;
+    if (next.size > MAX_FILE_SIZE) {
+      setError("File 200 MB se bada hai. Kripya 200 MB ya usse chhoti file select karein.");
+      setFile(null);
+      return;
+    }
+    if (!ALLOWED_TYPES.has(next.type)) {
+      setError("This file format is not supported. Please choose MP4, MOV, WebM, AVI, MKV, MP3, WAV, AAC, OGG or FLAC.");
+      setFile(null);
+    }
+  }
+
+  async function uploadForStaging() {
+    if (!file) { setError("Please select a video or audio file first."); return; }
+    if (!captchaToken) { setError("Please complete the security check first."); return; }
+    setBusy(true);
+    setError("");
+    setUploaded(false);
+    setProgress(0);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100) || "media-upload";
+      const result = await uploadPresigned(`incoming/${Date.now()}-${safeName}`, file, {
+        access: "private",
+        multipart: file.size > 100 * 1024 * 1024,
+        contentType: file.type,
+        handleUploadUrl: "/api/upload",
+        clientPayload: JSON.stringify({ turnstileToken: captchaToken }),
+        onUploadProgress: ({ percentage }) => setProgress(Math.round(percentage)),
+      });
+      if (!result.pathname) throw new Error("Upload completed without a storage reference.");
+      setUploaded(true);
+      setUploadedPath(result.pathname);
+      setIdempotencyKey(crypto.randomUUID());
+      setProgress(100);
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createJob() {
+    if (!uploadedPath || !idempotencyKey) { setError("Please upload your file first."); return; }
+    if (!captchaToken) { setError("Please complete the new security check before creating your job."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ pathname: uploadedPath, language, idempotencyKey, turnstileToken: captchaToken })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not create your job.");
+      setJobInfo({ jobId: data.jobId, status: data.status, customerAccessToken: data.customerAccessToken });
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create your job. Please try again.");
+      setCaptchaToken("");
+      if (widgetIdRef.current && window.turnstile) window.turnstile.reset(widgetIdRef.current);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <main className="page">
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
+      <Script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        strategy="afterInteractive"
+        onLoad={() => setTurnstileReady(true)}
+        onError={() => setError("Security verification could not load. Please refresh the page.")}
+      />
       <nav className="nav"><div className="brand"><span className="brandIcon"><Captions size={22}/></span> CaptionMitra <b>AI</b></div><span className="navTag">AI VIDEO CAPTIONS</span></nav>
       <section className="hero">
-        <div className="eyebrow"><Sparkles size={15}/> YOUR VIDEO, EVERY LANGUAGE</div>
+        <div className="eyebrow"><ShieldCheck size={15}/> SECURE VIDEO UPLOAD</div>
         <h1>Make every word<br/><span>count.</span></h1>
-        <p className="sub">Generate accurate subtitles and translate your videos into the languages your audience speaks.</p>
+        <p className="sub">Upload your video securely and prepare it for captions in the language your audience speaks.</p>
         <div className="languagePills"><span>Hindi</span><span>Marathi</span><span>Hinglish</span><span>English</span></div>
       </section>
       <section className="workspace">
-        <div className="sectionHead"><div><h2>Create captions</h2><p>Upload your video or audio and choose your output language.</p></div><div className="step">01 <span>/ 02</span></div></div>
+        <div className="sectionHead"><div><h2>Upload your media</h2><p>Choose a video or audio file up to 200 MB. Files above 100 MB upload in automatic parts.</p></div><div className="step">01 <span>/ 03</span></div></div>
         <label className="uploadBox">
-          <input type="file" accept="video/*,audio/*" onChange={e => {setFile(e.target.files?.[0] || null); setError(""); setDone(false);}}/>
+          <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-msvideo,video/x-matroska,audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/ogg,audio/flac,audio/webm" onChange={e => chooseFile(e.target.files?.[0] || null)} disabled={busy}/>
           <span className="uploadIcon"><UploadCloud size={27}/></span>
           <strong>{file ? file.name : "Choose a video or audio file"}</strong>
-          <small>{file ? `${(file.size / (1024*1024)).toFixed(1)} MB selected` : "MP4, MOV, MP3, WAV and more · Max 25 MB"}</small>
+          <small>{file ? `${(file.size / (1024*1024)).toFixed(1)} MB selected` : "MP4, MOV, WebM, AVI, MKV, MP3, WAV and more · Max 200 MB · Large files split automatically"}</small>
           <span className="browse">Browse files</span>
         </label>
         <div className="formRow">
           <label className="fieldLabel" htmlFor="language"><Languages size={16}/> OUTPUT LANGUAGE</label>
-          <select id="language" value={language} onChange={e => setLanguage(e.target.value)}>{languages.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
+          <select id="language" value={language} onChange={e => setLanguage(e.target.value)} disabled={busy}>{languages.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}</select>
         </div>
-        <button className="generate" onClick={generate} disabled={busy}>{busy ? <><Loader2 className="spin" size={18}/> Generating captions...</> : <><Sparkles size={18}/> Generate captions</>}</button>
+        <div className="pricePreview">
+          <div><span className="fieldLabel">ESTIMATED PRICE</span><strong>{estimatedPaise == null ? "Duration pending" : `₹${(estimatedPaise / 100).toFixed(2)}`}</strong><small>{durationSeconds == null ? "Select a file with readable duration metadata" : `${Math.floor(durationSeconds / 60)}m ${Math.floor(durationSeconds % 60)}s · ₹3/min · ₹10 minimum`}</small></div>
+          <span className="priceTag">No subscription</span>
+        </div>
+        <p className="fieldLabel">SECURITY VERIFICATION</p>
+        <div ref={captchaRef} className="captchaBox" />
+        {!siteKey && <small>Loading secure verification…</small>}
+        {busy && <div className="success"><Loader2 className="spin" size={17}/> Uploading securely… {progress}%</div>}
+        {busy && <div style={{height:8,background:"#e5e7eb",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",width:`${progress}%`,background:"#2563eb",transition:"width .2s"}} /></div>}
+        <button className="generate" onClick={uploadForStaging} disabled={busy || !file || !captchaToken}>
+          {busy ? <><Loader2 className="spin" size={18}/> Uploading…</> : <><UploadCloud size={18}/> Upload securely</>}
+        </button>
         {error && <div className="error">{error}</div>}
-        {done && <div className="success"><CheckCircle2 size={17}/> Captions generated. Review and edit the text below.</div>}
+        {uploaded && !jobInfo && <div className="success"><CheckCircle2 size={17}/> File uploaded to private temporary storage. Complete the security check again, then create your job.</div>}
+        {uploaded && !jobInfo && <button className="generate" onClick={createJob} disabled={busy || !captchaToken}><CheckCircle2 size={18}/> Create my job securely</button>}
+        {jobInfo && <div className="customerDashboard">
+          <div className="dashboardTitle"><div><span className="fieldLabel">YOUR JOB</span><h3>Processing dashboard</h3></div><span className="statusPill">{customerStatus?.status || jobInfo.status}</span></div>
+          <p className="jobId">Job ID: {jobInfo.jobId}</p>
+          <p className="sub" style={{fontSize:13}}>Media inspection: {customerStatus?.inspection?.status || "pending"}{customerStatus?.inspection?.status === "completed" && customerStatus?.payment?.amountPaise != null ? ` · Verified duration price: ₹${(customerStatus.payment.amountPaise / 100).toFixed(2)}` : ""}</p>
+          <div className="progressMeta"><strong>{customerStatus?.stage || "Waiting for status"}</strong><b>{customerStatus?.progressPercent ?? 0}%</b></div>
+          <div className="progressTrack"><div style={{ width: `${customerStatus?.progressPercent ?? 0}%` }} /></div>
+          <div className="dashboardFacts"><div><small>PAYMENT</small><strong>{customerStatus?.payment?.status === "partially_refunded" ? "Partially refunded" : customerStatus?.payment?.status === "refund_pending" ? "Refund pending" : customerStatus?.payment?.status === "refund_failed" ? "Refund failed" : customerStatus?.payment?.status === "refunded" ? "Refunded" : customerStatus?.payment?.status || "Not enabled"}</strong>{(customerStatus?.payment?.refundedAmountPaise || 0) > 0 && <small>₹{(customerStatus.payment.refundedAmountPaise / 100).toFixed(2)} returned</small>}</div><div><small>OUTPUT</small><strong>{customerStatus?.outputLanguage || language}</strong></div><div><small>PRICE</small><strong>{customerStatus?.payment?.amountPaise != null ? `₹${(customerStatus.payment.amountPaise / 100).toFixed(2)}` : estimatedPaise == null ? "Pending" : `Estimate ₹${(estimatedPaise / 100).toFixed(2)}`}</strong></div></div>
+          {customerStatus?.inspection?.status === "completed" && customerStatus?.payment?.status !== "verified" && customerStatus?.status === "awaiting_payment" && <button className="generate" onClick={startPayment} disabled={paymentBusy || busy}><span>{paymentBusy ? <Loader2 className="spin" size={18}/> : <ShieldCheck size={18}/>}</span>{paymentBusy ? "Preparing secure checkout…" : `Pay ₹${((customerStatus?.payment?.amountPaise || 0) / 100).toFixed(2)} securely`}</button>}
+          {customerStatus?.payment?.status === "verified" && <div className="success"><CheckCircle2 size={17}/> Payment verified. Your video will enter the processing queue.</div>}
+          {paymentMessage && <div className="success">{paymentMessage}</div>}
+          {customerStatus?.downloads?.available && <div className="downloads"><button onClick={() => downloadCaption("srt")} disabled={downloading}>Download SRT</button><button onClick={() => downloadCaption("txt")} disabled={downloading}>Download TXT</button></div>}
+          {statusError && <div className="error">{statusError}</div>}
+          <details className="accessDetails"><summary>Show your private access key</summary><code>{jobInfo.customerAccessToken}</code><small>Keep this key private. Anyone with it may access this job's status and results.</small></details>
+        </div>}
+        <p className="sub" style={{fontSize:13,marginTop:16}}>Your file is stored privately. Do not upload confidential material during this setup test. Automatic deletion will be connected with the processing worker before launch.</p>
       </section>
-      {segments.length > 0 && <section className="results">
-        <div className="sectionHead"><div><h2>Your subtitles</h2><p>{segments.length} caption segments · You can edit each line.</p></div></div>
-        {segments.map((s,i) => <div className="segment" key={i}><span>{stamp(s.start).slice(0,8)}</span><textarea value={s.text} onChange={e => setSegments(old => old.map((x,j) => j===i ? {...x,text:e.target.value} : x))}/></div>)}
-        <div className="downloads"><button onClick={() => download("srt")}><Download size={16}/> Download SRT</button><button onClick={() => download("txt")}><Download size={16}/> Download TXT</button></div>
-      </section>}
       <footer><span>© 2026 CaptionMitra AI</span><span>Made for creators <FileVideo size={14}/></span></footer>
     </main>
   );

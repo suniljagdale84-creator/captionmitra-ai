@@ -1,0 +1,83 @@
+name: CaptionMitra CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [captionmitra-pre-vps-setup]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: captionmitra
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: captionmitra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U captionmitra -d captionmitra_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate all PostgreSQL migrations
+        env:
+          PGPASSWORD: ci-only-password
+        run: |
+          set -euo pipefail
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Test PostgreSQL payment and refund persistence
+        env:
+          PGPASSWORD: ci-only-password
+        run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/tests/payment_refund_schema_test.sql
+      - name: Test PostgreSQL media inspection lease recovery
+        env:
+          PGPASSWORD: ci-only-password
+        run: psql -h localhost -U captionmitra -d captionmitra_test -v ON_ERROR_STOP=1 -f database/tests/media_inspection_lease_test.sql
+      - name: Test Razorpay webhook signature helper
+        run: node --test src/lib/razorpay-webhook-signature.test.mjs
+      - name: Test Razorpay webhook event validation
+        run: node --test src/lib/razorpay-event-validation.test.mjs
+      - name: Install FFmpeg and FFprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm install --no-audit --no-fund
+      - name: Test worker modules including real media integration
+        working-directory: worker
+        run: npm test && npm run check
+      - name: Build Next.js application
+        run: npm run build
+        env:
+          OPENAI_API_KEY: ci-placeholder-not-a-real-key
+          SITE_KEY: 1x00000000000000000000AA
+          TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run responsive browser checks
+        run: npm run test:e2e
+        env:
+          CI: "true"
+          OPENAI_API_KEY: ci-placeholder-not-a-real-key
+          SITE_KEY: 1x00000000000000000000AA
+          TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
